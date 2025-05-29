@@ -63,6 +63,9 @@ HBITMAP MakeBitmapWithName(const char *Name) {
 			break;
 		}
 	}
+	if(Count == 0) {
+		if(ShowInBitmap[0] > 0 && ShowInBitmap[1] < 0) ShowInBitmap[2] = Name[2];
+	}
 	ForeColor = RGB(255 - GetRValue(BackgroundColor), 255 - GetGValue(BackgroundColor), 255 - GetBValue(BackgroundColor));
 	HDC hdc = GetDC(0), hMemDC = CreateCompatibleDC(hdc);
     HBITMAP hBitmap = CreateCompatibleBitmap(hdc, 64, 64);
@@ -98,6 +101,7 @@ void* RecvMessageThread(void* lParam) {
 			    	ImageList_Add(hImageList, Users[UsersCount].hProfilePicture, NULL);
 					UsersCount += 1;
 					ListView_SetImageList(GetDlgItem(hWndMain, 2), hImageList, LVSIL_NORMAL);
+					ListView_SetImageList(GetDlgItem(hWndMain, 8), hImageList, LVSIL_NORMAL);
 				}
 				LVITEMA lvi;
 				lvi.pszText = Str;
@@ -105,19 +109,45 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+		    	lvi.pszText = Str;
+		    	lvi.mask = LVIF_TEXT;
+		    	int k;
+				lvi.cchTextMax = 114514;
+				for(k = 0; k < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); k++) {
+					lvi.iItem = k;
+					ListView_GetItem(GetDlgItem(hWndMain, 8), &lvi);
+					if(strcmp(lvi.pszText, ReceiveData) == 0) break;
+				}
+				if(k == ListView_GetItemCount(GetDlgItem(hWndMain, 8))) {
+					lvi.pszText = ReceiveData;
+					lvi.mask = LVIF_TEXT | LVIF_IMAGE;
+					lvi.iImage = i + 2;
+		    		ListView_InsertItem(GetDlgItem(hWndMain, 8), &lvi);
+				}
 				break;
 			}
 			case '\xB': {
+				char Str[114514];
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
-				sprintf(ReceiveData, "%s left the chat room", ReceiveData);
+				sprintf(Str, "%s left the chat room", ReceiveData);
 				PeopleCount -= 1;
 				LVITEMA lvi;
-				lvi.pszText = ReceiveData;
+				lvi.pszText = Str;
 				lvi.mask = LVIF_TEXT;
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				int i;
+				lvi.cchTextMax = 114514;
+				for(i = 0; i < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); i++) {
+					lvi.iItem = i;
+					ListView_GetItem(GetDlgItem(hWndMain, 8), &lvi);
+					if(strcmp(lvi.pszText, ReceiveData) == 0) break;
+				}
+				if(i != ListView_GetItemCount(GetDlgItem(hWndMain, 8))) {
+					ListView_DeleteItem(GetDlgItem(hWndMain, 8), i);
+				}
 				break;
 			}
 			case '\xD': {
@@ -135,6 +165,8 @@ void* RecvMessageThread(void* lParam) {
 		    	ImageList_Add(hImageList, MakeBitmapWithName("UnknownName"), NULL);
 				Head = Last = (struct People*)calloc(1, sizeof(struct People));
 				UsersCount = PeopleCount;
+				LVITEMA lvi;
+				ListView_DeleteAllItems(GetDlgItem(hWndMain, 8));
 			    for(i = 0; i < PeopleCount; i++) {
 			    	PNew = (struct People*)calloc(1, sizeof(struct People));
 			    	recv(sockfd, &length, 1, 0);
@@ -143,11 +175,17 @@ void* RecvMessageThread(void* lParam) {
 			    	if(Users[i].hProfilePicture != NULL) DeleteObject(Users[i].hProfilePicture);
 			    	Users[i].hProfilePicture = MakeBitmapWithName(Users[i].Name);
 			    	ImageList_Add(hImageList, Users[i].hProfilePicture, NULL);
+			    	lvi.pszText = PNew -> Name;
+			    	lvi.mask = LVIF_TEXT | LVIF_IMAGE;
+			    	lvi.iItem = lvi.iSubItem = 0;
+			    	lvi.iImage = i + 2;
+			    	ListView_InsertItem(GetDlgItem(hWndMain, 8), &lvi);
 			    	PNew -> Prev = Last;
 			    	Last -> Next = PNew;
 			    	Last = PNew;
 				}
 				ListView_SetImageList(GetDlgItem(hWndMain, 2), hImageList, LVSIL_NORMAL);
+				ListView_SetImageList(GetDlgItem(hWndMain, 8), hImageList, LVSIL_NORMAL);
 				break;
 			}
 			case '\xF': {

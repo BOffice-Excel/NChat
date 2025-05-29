@@ -6,7 +6,7 @@
 #include <time.h>
 short ListenPort = 7900;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256];
-const char *VersionData = "\x1\x0\x0";
+const char *VersionData = "\x1\x0\x1";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -198,7 +198,7 @@ int main() {
 	}*/
 	strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
 	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(ULIST));
-	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server");
+	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server(Version %d.%d.%d)", (unsigned char)VersionData[0], (unsigned char)VersionData[1], (unsigned char)VersionData[2]);
 	LogOut("Server Startup/INFO", 0, "Loading config file...");
 #ifdef _WIN32 //Windows Server
 	WSADATA wsaData;
