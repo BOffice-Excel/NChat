@@ -150,6 +150,16 @@ void* RecvMessageThread(void* lParam) {
 				}
 				break;
 			}
+			case '\xC': {
+				EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
+				MessageBox(NULL, "You has kicked out by server!", "Connection closed by server", MB_ICONINFORMATION);
+				DestroyWindow(hWndMain);
+				SendMessage(hWndMain, WM_DESTROY, 0, 0);
+				closesocket(sockfd);
+				WSACleanup();
+				return NULL;
+				break;
+			}
 			case '\xD': {
 			    recv(sockfd, (char*)&PeopleCount, sizeof(PeopleCount), 0);
 			    int i;
@@ -232,8 +242,9 @@ void* RecvMessageThread(void* lParam) {
 		memset(ReceiveData, 0, sizeof(ReceiveData));
 	}
 	EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
-	if(MessageBox(hWndMain, "Connection closed by server.\nDo you want do quit from this page?", "Connection interrupted", MB_ICONQUESTION | MB_YESNO) != IDYES) {
+	if(MessageBox(hWndMain, "Connection closed by server.\nDo you want do quit from this page?", "Connection interrupted", MB_ICONQUESTION | MB_YESNO) == IDYES) {
 		DestroyWindow(hWndMain);
+		SendMessage(hWndMain, WM_DESTROY, 0, 0);
 	}
 	send(sockfd, "\xF", 1, 0);
     closesocket(sockfd);
@@ -687,14 +698,14 @@ int main() {
 	wc.hIconSm		 = LoadIcon(NULL, IDI_APPLICATION); /* as above */
 	if(!RegisterClassEx(&wc)) {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
-		return 0;
+		return -1;
 	}
 	hWndMain = CreateWindowEx(0, "NChat-Client-Login", "Login the chat room",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION,
 		CW_USEDEFAULT, CW_USEDEFAULT, 1024, 512, NULL, NULL, NULL, NULL);
 	if(hWndMain == NULL) {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
-		return 0;
+		return -1;
 	}
 	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
 		if(IsDialogMessage(hWndMain, &Msg) == FALSE) {
@@ -733,7 +744,7 @@ int main() {
 		CW_USEDEFAULT, CW_USEDEFAULT, 1536, 768, NULL, NULL, NULL, NULL);
 	if(hWndMain == NULL) {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
-		return 0;
+		return -1;
 	}
 	pthread_t MessageHandler_t;
 	pthread_create(&MessageHandler_t, NULL, RecvMessageThread, NULL);
@@ -743,5 +754,7 @@ int main() {
 			DispatchMessage(&Msg);
 		}
 	}
-	return 0;
+	closesocket(sockfd);
+	WSACleanup();
+	return Msg.wParam;
 }

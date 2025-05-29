@@ -6,7 +6,7 @@
 #include <time.h>
 short ListenPort = 7900;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256];
-const char *VersionData = "\x1\x0\x1";
+const char *VersionData = "\x1\x1\x0";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -50,8 +50,24 @@ void* InputThread(void* lParam) {
 			}
 			printf("\n");
 		}
+		else if(strcmp(lpstrCommand, "kick") == 0) {
+			struct ULIST *This = UL_Head;
+			while(This != NULL) {
+				if(strcmp(This -> UserName, lpstrInput + 5) == 0) break;
+				This = This -> Next;
+			}
+			if(This != NULL) {
+				This -> Last -> Next = This -> Next;
+				if(This -> Next != NULL) This -> Next -> Last = This -> Last;
+				send(This -> UserBindClient, "\xC", 1, 0);
+				closesocket(This -> UserBindClient);
+				LogOut("Server Thread/INFO", 0, "Kicked %s", lpstrInput + 5);
+				free(This);
+			}
+			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
+		}
 		else {
-			LogOut("Server Thread/ERROR", 0, "%s <--Unknown Command", lpstrInput);
+			LogOut("Server Thread/ERROR", 0, "%s <--Unknown Command", lpstrCommand);
 		}
 	}
 	return NULL;
