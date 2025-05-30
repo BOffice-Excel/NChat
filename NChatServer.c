@@ -4,9 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
+#define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
+#define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 short ListenPort = 7900;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256];
-const char *VersionData = "\x1\x1\x0";
+const char *VersionData = "\x1\x1\x1";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -180,6 +183,51 @@ void* SocketHandler(void* lParam) {
 					closesocket(ClientSocket);
 					break;
 				}
+				case 'G': {
+					char RealPath[1145];
+					memset(RealPath, 0, sizeof(RealPath));
+					strcpy(RealPath, "./Files");
+					recv(ClientSocket, ReceiveData, sizeof(ReceiveData), 0);
+					sscanf(ReceiveData, "ET %s HTTP/1.1", RealPath + strlen(RealPath));
+					LogOut("Server Thread/INFO", 0, "WebBrowser sent a request: GET %s HTTP/1.1", RealPath + 7);
+					int i, ReadData;
+#ifdef _WIN32
+					for(i = 0; i < strlen(RealPath); i++) {
+						if(RealPath[i] == '/') RealPath[i] = '\\';
+					}
+#endif
+					FILE* lpFile;
+					if(strcmp(RealPath, ".\\Files\\") == 0) {
+						lpFile = fopen(
+#ifdef _WIN32
+						".\\Files\\dl.html"
+#endif
+						, "rb");
+					}
+					else lpFile = fopen(RealPath, "rb");
+					if(lpFile == NULL) {
+						send(ClientSocket, NOT_FOUND, strlen(NOT_FOUND), 0);
+						closesocket(ClientSocket);
+						return NULL;
+					}
+					if(strcmp(RealPath, ".\\Files\\") == 0) {
+						send(ClientSocket, PLAIN_HTML, strlen(PLAIN_HTML), 0);
+					}
+					else send(ClientSocket, PLAIN_DATA, strlen(PLAIN_DATA), 0);
+					do {
+						ReadData = fread(ReceiveData, sizeof(char), sizeof(ReceiveData) / sizeof(char), lpFile);
+						send(ClientSocket, ReceiveData, ReadData, 0);
+					} while(ReadData > 0);
+					fclose(lpFile);
+					closesocket(ClientSocket);
+					return NULL;
+					break;
+				}
+				default: {
+					closesocket(ClientSocket);
+					return NULL;
+					break;
+				}
 			}
 		}
 	}
@@ -198,8 +246,8 @@ void* SocketHandler(void* lParam) {
 			This = This -> Next;
 		}
 		free(UL_New);
+		UsersCount -= 1;
 	}
-	UsersCount -= 1;
 	//send(ClientSocket, "\x1|OK_LOGOUT", 11, 0);
 	return NULL;
 }

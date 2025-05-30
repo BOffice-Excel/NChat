@@ -519,6 +519,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)9, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Auto Scroll To Bottom",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
+			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
 			ListView_SetView(GetDlgItem(hWnd, 2), LV_VIEW_TILE);
 			if(UseDarkMode == 1) {
 				ListView_SetBkColor(GetDlgItem(hWnd, 2), RGB(25, 25, 25));
@@ -676,7 +677,7 @@ int main() {
 			CloseJson(lpConfigHandle);
 		}
 	}
-	WNDCLASSEX wc;
+	WNDCLASSEXA wc;
 	MSG Msg;
 
 	memset(&wc, 0, sizeof(wc));
@@ -686,16 +687,14 @@ int main() {
 	wc.hCursor		 = LoadCursor(NULL, IDC_ARROW);
 	wc.hbrBackground = (UseDarkMode == 1) ? CreateSolidBrush(RGB(25, 25, 25)) : CreateSolidBrush(RGB(255, 255, 255));
 	wc.lpszClassName = "NChat-Client-Login";
-	wc.hIcon		 = LoadIcon(NULL, IDI_APPLICATION); /* use "A" as icon name when you want to use the project icon */
-	wc.hIconSm		 = LoadIcon(NULL, IDI_APPLICATION); /* as above */
+	wc.hIcon		 = LoadIcon(wc.hInstance, "A"); /* use "A" as icon name when you want to use the project icon */
+	wc.hIconSm		 = LoadIcon(wc.hInstance, "A"); /* as above */
 	if(!RegisterClassEx(&wc)) {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return 0;
 	}
 	wc.lpfnWndProc	 = WndProc;
 	wc.lpszClassName = "NChat-Client";
-	wc.hIcon		 = LoadIcon(NULL, IDI_APPLICATION); /* use "A" as icon name when you want to use the project icon */
-	wc.hIconSm		 = LoadIcon(NULL, IDI_APPLICATION); /* as above */
 	if(!RegisterClassEx(&wc)) {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;

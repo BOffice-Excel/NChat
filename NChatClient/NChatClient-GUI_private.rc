@@ -4,6 +4,8 @@
 #include <windows.h> // include for version info constants
 
 
+A ICON "NChatClient-GUI.ico"
+
 //
 // SUPPORT FOR WINDOWS XP THEMES:
 // THIS WILL MAKE THE PROGRAM USE THE COMMON CONTROLS
@@ -15,8 +17,8 @@
 // TO CHANGE VERSION INFORMATION, EDIT PROJECT OPTIONS...
 //
 1 VERSIONINFO
-FILEVERSION 1,1,0,25
-PRODUCTVERSION 1,1,0,25
+FILEVERSION 1,1,1,28
+PRODUCTVERSION 1,1,1,28
 FILETYPE VFT_APP
 {
   BLOCK "StringFileInfo"
@@ -24,14 +26,14 @@ FILETYPE VFT_APP
     BLOCK "040904E4"
     {
       VALUE "CompanyName", "NotMyFaults"
-      VALUE "FileVersion", "1.1.0.25"
+      VALUE "FileVersion", "1.1.1.28"
       VALUE "FileDescription", "NChat Client"
       VALUE "InternalName", "NChatClient"
       VALUE "LegalCopyright", ""
       VALUE "LegalTrademarks", ""
       VALUE "OriginalFilename", "NChatClient-GUI.exe"
       VALUE "ProductName", "NChat"
-      VALUE "ProductVersion", "1.1.0.25"
+      VALUE "ProductVersion", "1.1.1.28"
     }
   }
   BLOCK "VarFileInfo"
