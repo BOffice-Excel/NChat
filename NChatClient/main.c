@@ -596,6 +596,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
         		case 9: {
         			char *lpstrMessage = (char*)calloc(65534, sizeof(char));
         			GetDlgItemTextA(hWnd, 3, lpstrMessage, 65534);
+        			if(lpstrMessage[0] == '\0') break;
         			send(sockfd, "\xB", 1, 0); 
         			send(sockfd, lpstrMessage, strlen(lpstrMessage), 0);
         			SetDlgItemTextA(hWnd, 3, "");

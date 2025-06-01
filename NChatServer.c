@@ -1,15 +1,37 @@
 #include <pthread.h>
+#ifdef _WIN32
 #include <WinSock2.h>
 #include <ws2tcpip.h>
+#else
+#include<unistd.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include<arpa/inet.h>
+#include<netinet/in.h>
+#ifndef SOCKET
+#if 1
+typedef unsigned long long	SOCKET;
+#else
+typedef long long		SOCKET;
+#endif
+#endif
+#ifndef SOCKET_ERROR
+#define INVALID_SOCKET	(SOCKET)(~0)
+#define SOCKET_ERROR	(-1)
+#endif
+#define closesocket(sock) close(sock)
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <stdlib.h>
+#include <stdarg.h>
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 short ListenPort = 7900;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256];
-const char *VersionData = "\x1\x1\x1";
+const char *VersionData = "\x1\x1\x2";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -34,7 +56,7 @@ void* InputThread(void* lParam) {
 	char *lpstrInput = (char*)calloc(114514, sizeof(char)), *lpstrCommand = (char*)calloc(32767, sizeof(char));
 	while(1) {
 		memset(lpstrInput, 0, sizeof(char) * 114514);
-		gets(lpstrInput);
+		fgets(lpstrInput, 114514, stdin);
 		sscanf(lpstrInput, "%s", lpstrCommand);
 		if(strcmp(lpstrCommand, "exit") == 0) {
 			LogOut("Server Thread/INFO", 0, "Stopping the Server");
@@ -101,7 +123,7 @@ void* SocketHandler(void* lParam) {
 						if(strcmp(ReceiveData, InvitationCode) == 0) {
 							char BytesOfUserName;
 							recv(ClientSocket, &BytesOfUserName, 1, 0);
-							UL_New = (struct ULIST*)calloc(1, sizeof(ULIST));
+							UL_New = (struct ULIST*)calloc(1, sizeof(struct ULIST));
 							UL_Last -> Next = UL_New;
 							UL_New -> Last = UL_Last;
 							UL_Last = UL_New;
@@ -109,7 +131,7 @@ void* SocketHandler(void* lParam) {
 							UL_New -> UserBindClient = ClientSocket;
 							send(ClientSocket, "\x1|OK_CONNECTION", 16, 0);
 							LogOut("Server Thread/INFO", 0, "%s joined the chat room", UL_New -> UserName);
-							ULIST *This = UL_Head -> Next;
+							struct ULIST *This = UL_Head -> Next;
 							char SendMsg[4];
 							SendMsg[0] = '\xA';
 							SendMsg[1] = strlen(UL_New -> UserName);
@@ -136,8 +158,12 @@ void* SocketHandler(void* lParam) {
 					break;
 				}
 				case 0xB: {//Send Message(Text)
+#ifdef _WIN32
 					__int64 iSize;
-					ULIST *This = UL_Head -> Next;
+#else
+					__int64_t iSize;
+#endif
+					struct ULIST *This = UL_Head -> Next;
 					char SendMsg[4];
 					SendMsg[0] = '\xF';
 					SendMsg[1] = strlen(UL_New -> UserName);
@@ -167,7 +193,7 @@ void* SocketHandler(void* lParam) {
 					break;
 				}
 				case 0xD: {//List Users
-					ULIST *This = UL_Head -> Next;
+					struct ULIST *This = UL_Head -> Next;
 					send(ClientSocket, "\xD", 1, 0);
 					send(ClientSocket, (const char*)&UsersCount, sizeof(UsersCount), 0);
 					while(This != NULL) {
@@ -197,20 +223,22 @@ void* SocketHandler(void* lParam) {
 					}
 #endif
 					FILE* lpFile;
-					if(strcmp(RealPath, ".\\Files\\") == 0) {
+					if(strcmp(RealPath, ".\\Files\\") == 0 || strcmp(RealPath, "./Files/") == 0) {
 						lpFile = fopen(
 #ifdef _WIN32
 						".\\Files\\dl.html"
+#else
+						"./Files/dl.html"
 #endif
 						, "rb");
 					}
-					else lpFile = fopen(RealPath, "rb");
+					else lpFile = fopen(RealPath + 2, "rb");
 					if(lpFile == NULL) {
 						send(ClientSocket, NOT_FOUND, strlen(NOT_FOUND), 0);
 						closesocket(ClientSocket);
 						return NULL;
 					}
-					if(strcmp(RealPath, ".\\Files\\") == 0) {
+					if(strcmp(RealPath, ".\\Files\\") == 0 || strcmp(RealPath, "./Files/") == 0) {
 						send(ClientSocket, PLAIN_HTML, strlen(PLAIN_HTML), 0);
 					}
 					else send(ClientSocket, PLAIN_DATA, strlen(PLAIN_DATA), 0);
@@ -236,7 +264,7 @@ void* SocketHandler(void* lParam) {
 		else UL_Last = UL_New -> Last;
 		UL_New -> Last -> Next = UL_New -> Next;
 		LogOut("Server Thread/INFO", 0, "%s left the chat room", UL_New -> UserName);
-		ULIST *This = UL_Head -> Next;
+		struct ULIST *This = UL_Head -> Next;
 		char SendMsg[4];
 		SendMsg[0] = '\xB';
 		SendMsg[1] = strlen(UL_New -> UserName);
@@ -253,15 +281,35 @@ void* SocketHandler(void* lParam) {
 }
 int main() {
 	int iSendResult, iResult, iEnum;
-	srand(time(NULL));
-	/*for(iEnum = 0; iEnum < 128; iEnum++) {
+	FILE *lpConfig = fopen("Config.nchatserver", "rb");
+	if(lpConfig != NULL) {
+		fread(InvitationCode, sizeof(char), 25, lpConfig);
+		if(memcmp(InvitationCode, "NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", 25) == 0) {
+			fread(&ListenPort, sizeof(ListenPort), 1, lpConfig);
+			unsigned char ICSize;
+			fread(&ICSize, sizeof(ICSize), 1, lpConfig);
+			if(ICSize > 128) {
+				LogOut("Server Thread/WARN", 0, "The size of InvitationCode cannot be larger than 128.");
+				for(iEnum = 0; iEnum < 128; iEnum++) {
+					int iRand = rand() % 62;
+					if(iRand < 26) InvitationCode[iEnum] = iRand + 'A';
+					else if(iRand < 36) InvitationCode[iEnum] = iRand + '0' - 26;
+					else InvitationCode[iEnum] = iRand + 'a' - 36;
+				}
+			}
+			else fread(InvitationCode, sizeof(char), ICSize, lpConfig);
+		} 
+		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
+		fclose(lpConfig);
+	}
+	else for(iEnum = 0; iEnum < 128; iEnum++) {
 		int iRand = rand() % 62;
 		if(iRand < 26) InvitationCode[iEnum] = iRand + 'A';
 		else if(iRand < 36) InvitationCode[iEnum] = iRand + '0' - 26;
 		else InvitationCode[iEnum] = iRand + 'a' - 36;
-	}*/
-	strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
-	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(ULIST));
+	}
+	//strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
+	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(struct ULIST));
 	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server(Version %d.%d.%d)", (unsigned char)VersionData[0], (unsigned char)VersionData[1], (unsigned char)VersionData[2]);
 	LogOut("Server Startup/INFO", 0, "Loading config file...");
 #ifdef _WIN32 //Windows Server
@@ -285,7 +333,7 @@ int main() {
 	struct sockaddr_in SockAddr;
 	SockAddr.sin_family = AF_INET;
 	SockAddr.sin_port = htons(ListenPort);
-	SockAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+	SockAddr.sin_addr.s_addr = htonl(INADDR_ANY); 
 	iResult = bind(ListenSocket, (struct sockaddr*)&SockAddr, sizeof(SockAddr));
 	if(iResult == SOCKET_ERROR) {
 		LogOut("Server Startup/ERROR", 0, "Bind Listening Failed!");
