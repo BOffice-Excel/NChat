@@ -294,10 +294,12 @@ BOOL Signin(const char *IP, const char *Port, const char *Name, const char *Invi
     send(sockfd, InvitationCode, 128, 0);
     send(sockfd, (char*)&iLen, 1, 0);
     send(sockfd, Name, iLen, 0);
+    memset(ReceiveData, 0, sizeof(ReceiveData));
     recv(sockfd, ReceiveData, sizeof(ReceiveData), 0);
     //RecvFull(sockfd, ReceiveData, sizeof(ReceiveData));
     if(ReceiveData[0] != '\x1') {
     	printf("Cannot connect to server: %s(%d)\n", ReceiveData + 2, ReceiveData[0]);
+    	closesocket(sockfd);
     	return FALSE;
 	}
 	else {

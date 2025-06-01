@@ -29,9 +29,9 @@ typedef long long		SOCKET;
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
-short ListenPort = 7900;
-char LogBuf[1145], LogBuf2[1145], InvitationCode[256];
-const char *VersionData = "\x1\x1\x2";
+unsigned short ListenPort = 7900, BlackListCount, WhiteListCount;
+char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList;
+const char *VersionData = "\x1\x1\x3";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -110,7 +110,10 @@ void* SocketHandler(void* lParam) {
 			break;
 		}
 		else if(iResult > 0) {
-			switch(ReceiveData[0]) {
+			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && beLogined == 0) {
+				send(ClientSocket, "\x4|ERR_LOGIN_FIRST", 17, 0);//The client has problem could do this
+			}
+			else switch(ReceiveData[0]) {
 				case 0xA: {//Login, Verify invitation code
 					if(beLogined == 0) {
 						recv(ClientSocket, ReceiveData, 3, 0);
@@ -121,13 +124,47 @@ void* SocketHandler(void* lParam) {
 						}
 						recv(ClientSocket, ReceiveData, 128, 0);
 						if(strcmp(ReceiveData, InvitationCode) == 0) {
-							char BytesOfUserName;
+							char BytesOfUserName, State = 0x00;
 							recv(ClientSocket, &BytesOfUserName, 1, 0);
 							UL_New = (struct ULIST*)calloc(1, sizeof(struct ULIST));
 							UL_Last -> Next = UL_New;
 							UL_New -> Last = UL_Last;
 							UL_Last = UL_New;
 							recv(ClientSocket, UL_New -> UserName, BytesOfUserName, 0);
+							int i;
+							if(EnableWhiteList == 1){
+								for(i = 1; i <= WhiteListCount; i += 1) {
+									if(strcmp(UL_New -> UserName, WhiteList[i]) == 0) {
+										State = 0x00;
+										break;
+									} 
+								}
+								if(i == WhiteListCount + 1) State = 0x01;
+							}
+							if(State == 0x00 && EnableBlackList == 1) {
+								for(i = 1; i <= BlackListCount; i += 1) {
+									if(strcmp(UL_New -> UserName, BlackList[i]) == 0) {
+										State = 0x02;
+										break;
+									}
+								}
+							}
+							if(State == 0x01) {
+								send(ClientSocket, "\x5|ERR_NOTON_WHITELIST", 21, 0);
+								closesocket(ClientSocket);
+								UL_New -> Last -> Next = UL_New -> Next;
+								if(UL_New -> Next != NULL) UL_New -> Next -> Last = UL_New -> Last;
+								free(UL_New);
+								return NULL;
+							}
+							else if(State == 0x02) {
+								send(ClientSocket, "\x6|ERR_ON_BLACKLIST", 18, 0);
+								closesocket(ClientSocket);
+								UL_New -> Last -> Next = UL_New -> Next;
+								if(UL_New -> Next != NULL) UL_New -> Next -> Last = UL_New -> Last;
+								free(UL_New);
+								return NULL;
+							}
 							UL_New -> UserBindClient = ClientSocket;
 							send(ClientSocket, "\x1|OK_CONNECTION", 16, 0);
 							LogOut("Server Thread/INFO", 0, "%s joined the chat room", UL_New -> UserName);
@@ -161,7 +198,7 @@ void* SocketHandler(void* lParam) {
 #ifdef _WIN32
 					__int64 iSize;
 #else
-					__int64_t iSize;
+					__int64_t iSize;//Linux just use __int64_t
 #endif
 					struct ULIST *This = UL_Head -> Next;
 					char SendMsg[4];
@@ -172,15 +209,15 @@ void* SocketHandler(void* lParam) {
 						send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
 						This = This -> Next;
 					}
-					printf("<%s> ", UL_New -> UserName);
+					printf("<%s> ", UL_New -> UserName);//Who sent the message
 					while(1) {
 						memset(ReceiveData, 0, sizeof(ReceiveData));
-						iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);
+						iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
 						if(iResult <= 0) break;
-						printf("%s", ReceiveData);
+						printf("%s", ReceiveData);//Print Message
 						This = UL_Head -> Next;
 						while(This != NULL) {
-							send(This -> UserBindClient, ReceiveData, iResult, 0);
+							send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
 							This = This -> Next;
 						}
 						if(iResult < sizeof(ReceiveData) - 1) break;
@@ -192,7 +229,7 @@ void* SocketHandler(void* lParam) {
 					
 					break;
 				}
-				case 0xD: {//List Users
+				case 0xD: {//List Users, no receiving anything
 					struct ULIST *This = UL_Head -> Next;
 					send(ClientSocket, "\xD", 1, 0);
 					send(ClientSocket, (const char*)&UsersCount, sizeof(UsersCount), 0);
@@ -209,7 +246,7 @@ void* SocketHandler(void* lParam) {
 					closesocket(ClientSocket);
 					break;
 				}
-				case 'G': {
+				case 'G': {//For webBrowser view
 					char RealPath[1145];
 					memset(RealPath, 0, sizeof(RealPath));
 					strcpy(RealPath, "./Files");
@@ -280,7 +317,7 @@ void* SocketHandler(void* lParam) {
 	return NULL;
 }
 int main() {
-	int iSendResult, iResult, iEnum;
+	int iSendResult, iResult, iEnum, iTmp;
 	FILE *lpConfig = fopen("Config.nchatserver", "rb");
 	if(lpConfig != NULL) {
 		fread(InvitationCode, sizeof(char), 25, lpConfig);
@@ -298,6 +335,26 @@ int main() {
 				}
 			}
 			else fread(InvitationCode, sizeof(char), ICSize, lpConfig);
+			fseek(lpConfig, 284, SEEK_SET);
+			fread(&iTmp, sizeof(char), 1, lpConfig);
+			EnableWhiteList = (iTmp & 1);
+			EnableBlackList = (((iTmp & (1 << 1)) == 0) ? 0 : 1);
+			fread(&WhiteListCount, sizeof(WhiteListCount), 1, lpConfig);
+			fread(&BlackListCount, sizeof(BlackListCount), 1, lpConfig);
+			for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
+				fread(&ICSize, sizeof(char), 1, lpConfig);
+				WhiteList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
+				fread(WhiteList[iEnum], sizeof(char), ICSize + 1, lpConfig);
+				if(WhiteList[iEnum][ICSize] != 0x3F) LogOut("Server Thread/WARN", 0, "There is a mistake in white list: The %dth whitelist user should have 0x3F as the terminator.", iEnum);
+				WhiteList[iEnum][ICSize] = '\0';
+			}
+			for(iEnum = 1; iEnum <= BlackListCount; iEnum += 1) {
+				fread(&ICSize, sizeof(char), 1, lpConfig);
+				BlackList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
+				fread(BlackList[iEnum], sizeof(char), ICSize + 1, lpConfig);
+				if(BlackList[iEnum][ICSize] != 0x3E) LogOut("Server Thread/WARN", 0, "There is a mistake in white list: The %dth blacklist user should have 0x3E as the terminator.", iEnum);
+				BlackList[iEnum][ICSize] = '\0';
+			}
 		} 
 		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
 		fclose(lpConfig);
