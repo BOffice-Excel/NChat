@@ -300,6 +300,7 @@ BOOL Signin(const char *IP, const char *Port, const char *Name, const char *Invi
     if(ReceiveData[0] != '\x1') {
     	printf("Cannot connect to server: %s(%d)\n", ReceiveData + 2, ReceiveData[0]);
     	closesocket(sockfd);
+    	sockfd = 0;
     	return FALSE;
 	}
 	else {

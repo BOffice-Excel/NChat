@@ -29,15 +29,16 @@ typedef long long		SOCKET;
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
-unsigned short ListenPort = 7900, BlackListCount, WhiteListCount;
+unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList;
-const char *VersionData = "\x1\x1\x3";
+const char *VersionData = "\x1\x1\x4";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
 	struct ULIST *Next, *Last;
 }*UL_Head, *UL_Last;
 int UsersCount = 0;
+SOCKET ListenSocket;
 void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
 	va_list v;
 	va_start(v, Format);
@@ -54,16 +55,32 @@ void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
 }
 void* InputThread(void* lParam) {
 	char *lpstrInput = (char*)calloc(114514, sizeof(char)), *lpstrCommand = (char*)calloc(32767, sizeof(char));
+	int i, j;
 	while(1) {
 		memset(lpstrInput, 0, sizeof(char) * 114514);
+		memset(lpstrCommand, 0, sizeof(char) * 32767);
 		fgets(lpstrInput, 114514, stdin);
+		if(lpstrInput[strlen(lpstrInput) - 1] == '\n') lpstrInput[strlen(lpstrInput) - 1] = '\0';
+		int NotSpaceAppeared = 0;
+		for(i = 0, j = 0; i < strlen(lpstrInput) ; i += 1) {
+			if(NotSpaceAppeared == 0 && lpstrInput[i] != ' ') NotSpaceAppeared = 1;
+			if(NotSpaceAppeared == 0) continue;
+			if(i != 0 && lpstrInput[i] == ' ' && lpstrInput[i - 1] == ' ') continue;
+			else {
+				lpstrInput[j] = lpstrInput[i];
+				j += 1;
+			}
+		}
+		lpstrInput[j] = '\0';
+		if(lpstrInput[j - 1] == ' ') lpstrInput[j - 1] = '\0';
 		sscanf(lpstrInput, "%s", lpstrCommand);
 		if(strcmp(lpstrCommand, "exit") == 0) {
-			LogOut("Server Thread/INFO", 0, "Stopping the Server");
+			//LogOut("Server Thread/INFO", 0, "Stopping the Server");
+			closesocket(ListenSocket);/*
 #ifdef _WIN32
 			WSACleanup();
-#endif
-			exit(0);
+#endif*/
+			return NULL;
 		}
 		else if(strcmp(lpstrCommand, "list") == 0) {
 			LogOut("Server Thread/INFO", 1, "There are %d people in the chat room: ", UsersCount);
@@ -76,6 +93,10 @@ void* InputThread(void* lParam) {
 			printf("\n");
 		}
 		else if(strcmp(lpstrCommand, "kick") == 0) {
+			if(lpstrInput[4] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command kick!");
+				continue;
+			}
 			struct ULIST *This = UL_Head;
 			while(This != NULL) {
 				if(strcmp(This -> UserName, lpstrInput + 5) == 0) break;
@@ -91,8 +112,169 @@ void* InputThread(void* lParam) {
 			}
 			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
 		}
+		else if(strcmp(lpstrCommand, "blacklist") == 0) {
+			if(lpstrInput[9] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist!");
+				continue;
+			}
+			sscanf(lpstrInput + 10, "%s", lpstrCommand);
+			if(strcmp(lpstrCommand, "help") == 0) {
+				LogOut("Server Thread/INFO", 0, "blacklist Command: add <UserName>, remove <UserName>, list, help");
+			}
+			else if(strcmp(lpstrCommand, "add") == 0) {
+				if(lpstrInput[13] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist's option add!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= BlackListCount; i += 1) {
+					if(BlackList[i] == NULL) {
+						j = 1;
+						break;
+					}
+				}
+				RealBLC += 1;
+				BlackList[i] = (char*)calloc(strlen(lpstrInput + 14) + 10, sizeof(char));
+				strcpy(BlackList[i], lpstrInput + 14);
+				if(j == 0) BlackListCount += 1;
+				LogOut("Server Thread/INFO", 0, "User %s was added to the blacklist.", BlackList[i]);
+			}
+			else if(strcmp(lpstrCommand, "remove") == 0) {
+				if(lpstrInput[16] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist's option remove!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= BlackListCount; i += 1) {
+					if(BlackList[i] != NULL && strcmp(BlackList[i], lpstrInput + 17) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					RealBLC -= 1;
+					LogOut("Server Thread/INFO", 0, "User %s was removed from the blacklist.", BlackList[i]);
+					BlackList[i] = NULL;
+				}
+				else LogOut("Server Thread/ERROR", 0, "User %s is not in the blacklist.", lpstrInput + 17);
+			}
+			else if(strcmp(lpstrCommand, "list") == 0) {
+				LogOut("Server Thread/INFO", 1, "There are %d user in the blacklist: ", RealBLC);
+				j = 0;
+				for(i = 1; i <= BlackListCount; i += 1) {
+					if(BlackList[i] != NULL) {
+						if(j == 1) printf(", ");
+						printf("%s", BlackList[i]);
+						j = 1;
+					}
+				}
+				printf("\n");
+			}
+			else LogOut("Server Thread/ERROR", 0, "blacklist %s<-- Unknown Option", lpstrCommand);
+		}
+		else if(strcmp(lpstrCommand, "whitelist") == 0) {
+			if(lpstrInput[9] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist!");
+				continue;
+			}
+			sscanf(lpstrInput + 10, "%s", lpstrCommand);
+			if(strcmp(lpstrCommand, "help") == 0) {
+				LogOut("Server Thread/INFO", 0, "whitelist Command: add <UserName>, remove <UserName>, list, help");
+			}
+			else if(strcmp(lpstrCommand, "add") == 0) {
+				if(lpstrInput[13] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist's option add!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= WhiteListCount; i += 1) {
+					if(WhiteList[i] == NULL) {
+						j = 1;
+						break;
+					}
+				}
+				RealWLC += 1;
+				WhiteList[i] = (char*)calloc(strlen(lpstrInput + 14) + 10, sizeof(char));
+				strcpy(WhiteList[i], lpstrInput + 14);
+				if(j == 0) WhiteListCount += 1;
+				LogOut("Server Thread/INFO", 0, "User %s was added to the whitelist.", WhiteList[i]);
+			}
+			else if(strcmp(lpstrCommand, "remove") == 0) {
+				if(lpstrInput[16] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist's option remove!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= WhiteListCount; i += 1) {
+					if(WhiteList[i] != NULL && strcmp(WhiteList[i], lpstrInput + 17) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					RealWLC -= 1;
+					LogOut("Server Thread/INFO", 0, "User %s was removed from the whitelist.", WhiteList[i]);
+					WhiteList[i] = NULL;
+				}
+				else LogOut("Server Thread/ERROR", 0, "User %s is not in the whitelist.", lpstrInput + 17);
+			}
+			else if(strcmp(lpstrCommand, "list") == 0) {
+				LogOut("Server Thread/INFO", 1, "There are %d user in the whitelist: ", RealWLC);
+				j = 0;
+				for(i = 1; i <= WhiteListCount; i += 1) {
+					if(WhiteList[i] != NULL) {
+						if(j == 1) printf(", ");
+						printf("%s", WhiteList[i]);
+						j = 1;
+					}
+				}
+				printf("\n");
+			}
+			else LogOut("Server Thread/ERROR", 0, "whitelist %s<-- Unknown Option", lpstrCommand);
+		}
+		else if(strcmp(lpstrCommand, "ban") == 0) {
+			if(lpstrInput[3] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command ban!");
+				continue;
+			}
+			struct ULIST *This = UL_Head;
+			while(This != NULL) {
+				if(strcmp(This -> UserName, lpstrInput + 4) == 0) break;
+				This = This -> Next;
+			}
+			if(This != NULL) {
+				This -> Last -> Next = This -> Next;
+				if(This -> Next != NULL) This -> Next -> Last = This -> Last;
+				send(This -> UserBindClient, "\xC", 1, 0);
+				closesocket(This -> UserBindClient);
+				j = 0;
+				for(i = 1; i <= BlackListCount; i += 1) {
+					if(BlackList[i] == NULL) {
+						j = 1;
+						break;
+					}
+				}
+				RealBLC += 1;
+				BlackList[i] = (char*)calloc(strlen(lpstrInput + 4) + 10, sizeof(char));
+				strcpy(BlackList[i], lpstrInput + 4);
+				if(j == 0) BlackListCount += 1;
+				LogOut("Server Thread/INFO", 0, "Banned %s", lpstrInput + 4);
+				free(This);
+			}
+			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
+		}
+		else if(strcmp(lpstrCommand, "help") == 0) {
+			LogOut("Server Thread/INFO", 0, "Commands: \n\
+  ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName>\n\
+  blacklist -> Manage the blacklist, Method: blacklist <add, help, list, remove> [User Name: Only add or remove option]\n\
+  exit -> Stop the server, Method: exit\n\
+  help -> Show this help text, Method: help\n\
+  list -> List the users, Method: list\n\
+  kick -> Kick user out of the room, Method: kick <User Name>\n\
+  whitelist -> Manage the whitelist, Method: whitelist <add, help, list, remove> [User Name: Only add or remove option]");
+		}
 		else {
-			LogOut("Server Thread/ERROR", 0, "%s <--Unknown Command", lpstrCommand);
+			LogOut("Server Thread/ERROR", 0, "%s<--Unknown Command", lpstrCommand);
 		}
 	}
 	return NULL;
@@ -124,17 +306,16 @@ void* SocketHandler(void* lParam) {
 						}
 						recv(ClientSocket, ReceiveData, 128, 0);
 						if(strcmp(ReceiveData, InvitationCode) == 0) {
-							char BytesOfUserName, State = 0x00;
-							recv(ClientSocket, &BytesOfUserName, 1, 0);
+							unsigned char BytesOfUserName, State = 0x00;
+							recv(ClientSocket, (char*)&BytesOfUserName, 1, 0);
 							UL_New = (struct ULIST*)calloc(1, sizeof(struct ULIST));
 							UL_Last -> Next = UL_New;
 							UL_New -> Last = UL_Last;
-							UL_Last = UL_New;
 							recv(ClientSocket, UL_New -> UserName, BytesOfUserName, 0);
 							int i;
 							if(EnableWhiteList == 1){
 								for(i = 1; i <= WhiteListCount; i += 1) {
-									if(strcmp(UL_New -> UserName, WhiteList[i]) == 0) {
+									if(WhiteList[i] != NULL && strcmp(UL_New -> UserName, WhiteList[i]) == 0) {
 										State = 0x00;
 										break;
 									} 
@@ -143,7 +324,7 @@ void* SocketHandler(void* lParam) {
 							}
 							if(State == 0x00 && EnableBlackList == 1) {
 								for(i = 1; i <= BlackListCount; i += 1) {
-									if(strcmp(UL_New -> UserName, BlackList[i]) == 0) {
+									if(BlackList[i] != NULL && strcmp(UL_New -> UserName, BlackList[i]) == 0) {
 										State = 0x02;
 										break;
 									}
@@ -166,6 +347,7 @@ void* SocketHandler(void* lParam) {
 								return NULL;
 							}
 							UL_New -> UserBindClient = ClientSocket;
+							UL_Last = UL_New;
 							send(ClientSocket, "\x1|OK_CONNECTION", 16, 0);
 							LogOut("Server Thread/INFO", 0, "%s joined the chat room", UL_New -> UserName);
 							struct ULIST *This = UL_Head -> Next;
@@ -318,12 +500,18 @@ void* SocketHandler(void* lParam) {
 }
 int main() {
 	int iSendResult, iResult, iEnum, iTmp;
-	FILE *lpConfig = fopen("Config.nchatserver", "rb");
+	unsigned char ICSize;
+	FILE *lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\config.nchatserver"
+#else
+	"configs/config.nchatserver"
+#endif
+	, "rb");
 	if(lpConfig != NULL) {
 		fread(InvitationCode, sizeof(char), 25, lpConfig);
 		if(memcmp(InvitationCode, "NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", 25) == 0) {
 			fread(&ListenPort, sizeof(ListenPort), 1, lpConfig);
-			unsigned char ICSize;
 			fread(&ICSize, sizeof(ICSize), 1, lpConfig);
 			if(ICSize > 128) {
 				LogOut("Server Thread/WARN", 0, "The size of InvitationCode cannot be larger than 128.");
@@ -335,19 +523,21 @@ int main() {
 				}
 			}
 			else fread(InvitationCode, sizeof(char), ICSize, lpConfig);
-			fseek(lpConfig, 284, SEEK_SET);
+		} 
+		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
+		fclose(lpConfig);
+		lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\blacklist.nchatserver"
+#else
+	"configs/blacklist.nchatserver"
+#endif
+	, "rb");
+		if(lpConfig != NULL) {
 			fread(&iTmp, sizeof(char), 1, lpConfig);
-			EnableWhiteList = (iTmp & 1);
-			EnableBlackList = (((iTmp & (1 << 1)) == 0) ? 0 : 1);
-			fread(&WhiteListCount, sizeof(WhiteListCount), 1, lpConfig);
+			EnableBlackList = (iTmp & 1);
 			fread(&BlackListCount, sizeof(BlackListCount), 1, lpConfig);
-			for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
-				fread(&ICSize, sizeof(char), 1, lpConfig);
-				WhiteList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
-				fread(WhiteList[iEnum], sizeof(char), ICSize + 1, lpConfig);
-				if(WhiteList[iEnum][ICSize] != 0x3F) LogOut("Server Thread/WARN", 0, "There is a mistake in white list: The %dth whitelist user should have 0x3F as the terminator.", iEnum);
-				WhiteList[iEnum][ICSize] = '\0';
-			}
+			RealBLC = BlackListCount;
 			for(iEnum = 1; iEnum <= BlackListCount; iEnum += 1) {
 				fread(&ICSize, sizeof(char), 1, lpConfig);
 				BlackList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
@@ -355,9 +545,29 @@ int main() {
 				if(BlackList[iEnum][ICSize] != 0x3E) LogOut("Server Thread/WARN", 0, "There is a mistake in white list: The %dth blacklist user should have 0x3E as the terminator.", iEnum);
 				BlackList[iEnum][ICSize] = '\0';
 			}
-		} 
-		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
-		fclose(lpConfig);
+			fclose(lpConfig);
+		}
+		lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\whitelist.nchatserver"
+#else
+	"configs/whitelist.nchatserver"
+#endif
+	, "rb");
+		if(lpConfig != NULL) {
+			fread(&iTmp, sizeof(char), 1, lpConfig);
+			EnableWhiteList = (iTmp & 1);
+			fread(&WhiteListCount, sizeof(WhiteListCount), 1, lpConfig);
+			RealWLC = WhiteListCount;
+			for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
+				fread(&ICSize, sizeof(char), 1, lpConfig);
+				WhiteList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
+				fread(WhiteList[iEnum], sizeof(char), ICSize + 1, lpConfig);
+				if(WhiteList[iEnum][ICSize] != 0x3F) LogOut("Server Thread/WARN", 0, "There is a mistake in white list: The %dth whitelist user should have 0x3F as the terminator.", iEnum);
+				WhiteList[iEnum][ICSize] = '\0';
+			}
+			fclose(lpConfig);
+		}
 	}
 	else for(iEnum = 0; iEnum < 128; iEnum++) {
 		int iRand = rand() % 62;
@@ -377,7 +587,7 @@ int main() {
 	}
 	LogOut("Server Startup/INFO", 0, "Initialized WinSock2 successfully.");
 #endif //_WIN32
-	SOCKET ListenSocket, ClientSocket;
+	SOCKET ClientSocket;
 	ListenSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if(ListenSocket == INVALID_SOCKET) {
 		LogOut("Server Startup/ERROR", 0, "Socket Failed!");
@@ -418,12 +628,11 @@ int main() {
 	while(1) {
 		ClientSocket = accept(ListenSocket, NULL, NULL);
 	    if(ClientSocket == INVALID_SOCKET) {
-	        LogOut("Server Thread/ERROR", 0, "Accept Failed!");
-	        closesocket(ListenSocket);
+	        //closesocket(ListenSocket);
 #ifdef _WIN32
 			WSACleanup();
 #endif
-			return 1;
+			break;
 		}
 		pthread_t Handler;
 		pthread_create(&Handler, NULL, SocketHandler, (void*)ClientSocket); 
@@ -432,6 +641,48 @@ int main() {
 #ifdef _WIN32 //Windows Clean Up
 	WSACleanup();
 #endif
-	LogOut("Server Thread/INFO", 0, "Stopping the Server");
+	LogOut("Server Close/INFO", 0, "Stopping the Server");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\blacklist.nchatserver"
+#else
+	"configs/blacklist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&EnableBlackList, sizeof(char), 1, lpConfig);
+		fwrite(&RealBLC, sizeof(RealBLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= BlackListCount; iEnum += 1) {
+			if(BlackList[iEnum] != NULL) {
+				iTmp = strlen(BlackList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(BlackList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x3E", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Blacklist saved.");
+	}
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\whitelist.nchatserver"
+#else
+	"configs/whitelist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&EnableWhiteList, sizeof(char), 1, lpConfig);
+		fwrite(&RealWLC, sizeof(RealWLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
+			if(WhiteList[iEnum] != NULL) {
+				iTmp = strlen(WhiteList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(WhiteList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x3F", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Whitelist saved.");
+	}
 	return 0;
 }
