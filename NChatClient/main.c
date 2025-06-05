@@ -15,7 +15,8 @@ typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     int   *piColFmt;
 } NEWLVTILEINFO, *PNEWLVTILEINFO;
 char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16];
-int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UsersCount = 0, UseDarkMode = 1;
+int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UseDarkMode = 1;
+unsigned int UsersCount = 0;
 HWND hWndMain;
 HIMAGELIST hImageList;
 struct People {
@@ -199,8 +200,10 @@ void* RecvMessageThread(void* lParam) {
 				break;
 			}
 			case '\xF': {
+				unsigned int iLen, iCount = 0;
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
+				recv(sockfd, (char*)&iLen, sizeof(iLen), 0);
 				LVITEMA lvi;
 				lvi.pszText = (char*)calloc(114514, sizeof(char));
 				int idx, iReceived, i;
@@ -214,13 +217,14 @@ void* RecvMessageThread(void* lParam) {
 					i += 2;
 				}
 				idx = strlen(lvi.pszText);
-				do {
+				while(1) {
 					memset(ReceiveData, 0, sizeof(ReceiveData));
 					iReceived = recv(sockfd, ReceiveData, sizeof(ReceiveData), 0);
 					memcpy(lvi.pszText + idx, ReceiveData, iReceived);
 					idx += iReceived;
-					if(iReceived < sizeof(ReceiveData)) break;
-				}while(iReceived > 0);
+					iCount += iReceived;
+					if(iCount >= iLen) break;
+				}
 				//printf("%s", ReceiveData);
 				lvi.mask = LVIF_TEXT | LVIF_IMAGE;
 				lvi.iSubItem = 0;
@@ -317,9 +321,11 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
 			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)4, NULL, NULL);
 			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "", WS_CHILD | WS_VISIBLE | ES_NUMBER | WS_TABSTOP | ES_AUTOHSCROLL | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)5, NULL, NULL);
-			CreateWindowExA(0, "BUTTON", "Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)6, NULL, NULL);
-			CreateWindowExA(0, "BUTTON", "Join In", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)7, NULL, NULL);
-			CreateWindowExA(0, "BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)8, NULL, NULL);
+			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "Server Information:\r\nN/A", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_READONLY | WS_HSCROLL | WS_VSCROLL | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)6, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Refresh", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)7, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Save", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)8, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Join In", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)9, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
 			SendDlgItemMessage(hWnd, 1, EM_SETCUEBANNER, TRUE, (LPARAM)L"Your User Name");
 			SendDlgItemMessage(hWnd, 1, EM_LIMITTEXT, 512, 0);
 			SendDlgItemMessage(hWnd, 3, EM_SETCUEBANNER, TRUE, (LPARAM)L"Your Invitation Code(It will show in the NChat Server's Log)");
@@ -334,7 +340,7 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 			SendDlgItemMessage(hWnd, 2, CB_ADDSTRING, 0, (LPARAM)"New Chat Room");
 			SendDlgItemMessage(hWnd, 2, CB_SETCURSEL, 0, 0);
 			SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(2, CBN_SELCHANGE), (LPARAM)GetDlgItem(hWnd, 2));
-			for(i = 1; i <= 8; i++) {
+			for(i = 1; i <= 10; i++) {
 				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
 				SetWindowTheme(GetDlgItem(hWnd, i), (UseDarkMode == 0) ? L"Explorer" : L"DarkMode_Explorer", NULL);
 			}
@@ -362,7 +368,44 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					}
 					break;
 				}
-				case 6: {
+				case 7: {
+					char IP[32767], Port[32767], Message[65564], Recv;
+					unsigned int UserLimit = 0, UserCount = 0;
+					memset(IP, 0, sizeof(IP));
+					memset(Port, 0, sizeof(Port));
+					GetDlgItemTextA(hWnd, 4, IP, sizeof(IP));
+					GetDlgItemTextA(hWnd, 5, Port, sizeof(Port));
+					struct addrinfo hints, *res;
+					int stat;
+					memset(&hints, 0, sizeof hints);
+					hints.ai_family = AF_UNSPEC;
+					hints.ai_socktype = SOCK_STREAM;
+					if ((stat = getaddrinfo(IP, Port, &hints, &res)) != 0) {
+					    sprintf(Message, "Getaddrinfo Failed: %s(%d)\n", gai_strerror(stat), stat);
+					    MessageBox(hWnd, Message, "Query Information Failed!", MB_ICONERROR);
+					    return FALSE;
+					}
+					SOCKET sockfd2 = socket(res -> ai_family, res -> ai_socktype, res -> ai_protocol);
+					if(sockfd2 == INVALID_SOCKET) {
+					    MessageBox(hWnd, "Socket Failed!", "Query Information Failed!", MB_ICONERROR);
+				        return FALSE;
+				    }
+				    int iResult = connect(sockfd2, res->ai_addr, res->ai_addrlen), iLen = strlen(Name);
+				    if(iResult == SOCKET_ERROR) {
+					    MessageBox(hWnd, "Connect Failed!", "Query Information Failed!", MB_ICONERROR);
+						closesocket(sockfd);
+				    	return FALSE;
+					}
+					send(sockfd2, "\xE", 1, 0);
+					recv(sockfd2, &Recv, sizeof(Recv), 0);
+					recv(sockfd2, (char*)&UserCount, sizeof(UserCount), 0);
+					recv(sockfd2, (char*)&UserLimit, sizeof(UserLimit), 0);
+					closesocket(sockfd);
+					sprintf(Message, "Server Information:\r\nUser: %u/%u", UserCount, UserLimit);
+					SetDlgItemText(hWnd, 6, Message);
+					break;
+				}
+				case 8: {
 					GetDlgItemText(hWnd, 2, ChatRooms[ChatRoom_LastChoose].Name, sizeof(ChatRooms[ChatRoom_LastChoose].Name));
 					GetDlgItemText(hWnd, 3, ChatRooms[ChatRoom_LastChoose].InvitationCode, sizeof(ChatRooms[ChatRoom_LastChoose].InvitationCode));
 					GetDlgItemText(hWnd, 4, ChatRooms[ChatRoom_LastChoose].IP, sizeof(ChatRooms[ChatRoom_LastChoose].IP));
@@ -381,7 +424,7 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(2, CBN_SELCHANGE), (LPARAM)GetDlgItem(hWnd, 2));
 					break;
 				}
-				case 7: {
+				case 9: {
 					SendMessage(hWnd, WM_COMMAND, 6, 0);
 					memset(Name, 0, sizeof(Name));
 					GetDlgItemText(hWnd, 1, Name, sizeof(Name));
@@ -441,7 +484,7 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					}
 					break;
 				}
-				case 8: {
+				case 10: {
 					SendMessage(hWnd, WM_COMMAND, 6, 0);
 					DestroyWindow(hWnd);
 					break;
@@ -485,9 +528,11 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 			SetWindowPos(GetDlgItem(hWnd, 3), NULL, 20, 120, Rect.right - 40, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 4), NULL, 20, 170, Rect.right - 40, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 5), NULL, 20, 220, Rect.right - 40, 30, SWP_NOZORDER);
-			SetWindowPos(GetDlgItem(hWnd, 6), NULL, Rect.right - 190, 270, 150, 30, SWP_NOZORDER);
-			SetWindowPos(GetDlgItem(hWnd, 7), NULL, Rect.right - 360, Rect.bottom - 50, 150, 30, SWP_NOZORDER);
-			SetWindowPos(GetDlgItem(hWnd, 8), NULL, Rect.right - 190, Rect.bottom - 50, 150, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 6), NULL, 20, 270, (Rect.right - 40) * 0.5, 120, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 7), NULL, (Rect.right - 40) * 0.5 + 40, 270, 150, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 8), NULL, Rect.right - 190, 270, 150, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 9), NULL, Rect.right - 360, Rect.bottom - 50, 150, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 10), NULL, Rect.right - 190, Rect.bottom - 50, 150, 30, SWP_NOZORDER);
 			break;
 		}
 		case WM_DESTROY: {
@@ -523,6 +568,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			CreateWindowExA(0, "BUTTON", "Auto Scroll To Bottom",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
+			CheckDlgButton(hWnd, 10, BST_CHECKED);
 			ListView_SetView(GetDlgItem(hWnd, 2), LV_VIEW_TILE);
 			if(UseDarkMode == 1) {
 				ListView_SetBkColor(GetDlgItem(hWnd, 2), RGB(25, 25, 25));
@@ -598,10 +644,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
         	switch(LOWORD(wParam)) {
         		case 9: {
         			char *lpstrMessage = (char*)calloc(65534, sizeof(char));
+        			unsigned int iLen;
         			GetDlgItemTextA(hWnd, 3, lpstrMessage, 65534);
-        			if(lpstrMessage[0] == '\0') break;
-        			send(sockfd, "\xB", 1, 0); 
-        			send(sockfd, lpstrMessage, strlen(lpstrMessage), 0);
+        			if(lpstrMessage[0] == '\0') {
+        				free(lpstrMessage);
+						break;
+					}
+        			iLen = strlen(lpstrMessage) + 1;
+        			send(sockfd, "\xB", 1, 0);
+        			send(sockfd, (const char*)&iLen, sizeof(iLen), 0);
+        			send(sockfd, lpstrMessage, iLen, 0);
+        			free(lpstrMessage);
         			SetDlgItemTextA(hWnd, 3, "");
 					break;
 				}

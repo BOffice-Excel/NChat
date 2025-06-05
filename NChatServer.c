@@ -31,13 +31,13 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList;
-const char *VersionData = "\x1\x1\x4";
+const char *VersionData = "\x1\x1\x5";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
 	struct ULIST *Next, *Last;
 }*UL_Head, *UL_Last;
-int UsersCount = 0;
+unsigned int UsersCount = 0, UserLimit;
 SOCKET ListenSocket;
 void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
 	va_list v;
@@ -83,7 +83,7 @@ void* InputThread(void* lParam) {
 			return NULL;
 		}
 		else if(strcmp(lpstrCommand, "list") == 0) {
-			LogOut("Server Thread/INFO", 1, "There are %d people in the chat room: ", UsersCount);
+			LogOut("Server Thread/INFO", 1, "There are %d of a max of %d players online: ", UsersCount, UserLimit);
 			struct ULIST* This = UL_Head -> Next;
 			while(This != NULL) {
 				printf("%s", This -> UserName);
@@ -114,12 +114,13 @@ void* InputThread(void* lParam) {
 		}
 		else if(strcmp(lpstrCommand, "blacklist") == 0) {
 			if(lpstrInput[9] != ' ') {
-				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist!");
+				LogOut("Server Thread/INFO", 0, "Blacklist is %s.", (EnableBlackList == 0) ? "disabled": "enabled");
+				//LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist!");
 				continue;
 			}
 			sscanf(lpstrInput + 10, "%s", lpstrCommand);
 			if(strcmp(lpstrCommand, "help") == 0) {
-				LogOut("Server Thread/INFO", 0, "blacklist Command: add <UserName>, remove <UserName>, list, help");
+				LogOut("Server Thread/INFO", 0, "blacklist Command: add <UserName>, disable, enable, list, remove <UserName>, help");
 			}
 			else if(strcmp(lpstrCommand, "add") == 0) {
 				if(lpstrInput[13] != ' ') {
@@ -170,16 +171,25 @@ void* InputThread(void* lParam) {
 				}
 				printf("\n");
 			}
+			else if(strcmp(lpstrCommand, "enable") == 0) {
+				EnableBlackList = 1;
+				LogOut("Server Thread/INFO", 0, "Blacklist was already enabled just now.");
+			}
+			else if(strcmp(lpstrCommand, "disable") == 0) {
+				EnableBlackList = 0;
+				LogOut("Server Thread/INFO", 0, "Blacklist was already disabled just now.");
+			}
 			else LogOut("Server Thread/ERROR", 0, "blacklist %s<-- Unknown Option", lpstrCommand);
 		}
 		else if(strcmp(lpstrCommand, "whitelist") == 0) {
 			if(lpstrInput[9] != ' ') {
-				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist!");
+				LogOut("Server Thread/INFO", 0, "Whitelist is %s.", (EnableWhiteList == 0) ? "disabled": "enabled");
+				//LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist!");
 				continue;
 			}
 			sscanf(lpstrInput + 10, "%s", lpstrCommand);
 			if(strcmp(lpstrCommand, "help") == 0) {
-				LogOut("Server Thread/INFO", 0, "whitelist Command: add <UserName>, remove <UserName>, list, help");
+				LogOut("Server Thread/INFO", 0, "whitelist Command: add <UserName>, disable, enable, list, remove <UserName>, help");
 			}
 			else if(strcmp(lpstrCommand, "add") == 0) {
 				if(lpstrInput[13] != ' ') {
@@ -230,6 +240,14 @@ void* InputThread(void* lParam) {
 				}
 				printf("\n");
 			}
+			else if(strcmp(lpstrCommand, "enable") == 0) {
+				EnableWhiteList = 1;
+				LogOut("Server Thread/INFO", 0, "Whitelist was already enabled just now.");
+			}
+			else if(strcmp(lpstrCommand, "disable") == 0) {
+				EnableWhiteList = 0;
+				LogOut("Server Thread/INFO", 0, "Whitelist was already disabled just now.");
+			}
 			else LogOut("Server Thread/ERROR", 0, "whitelist %s<-- Unknown Option", lpstrCommand);
 		}
 		else if(strcmp(lpstrCommand, "ban") == 0) {
@@ -263,15 +281,23 @@ void* InputThread(void* lParam) {
 			}
 			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
 		}
+		else if(strcmp(lpstrCommand, "limit") == 0) {
+			if(lpstrInput[5] != ' ') {
+				LogOut("Server Thread/INFO", 0, "User Maximum Limit: %d.", UserLimit);
+				continue;
+			}
+			sscanf(lpstrInput + 6, "%d", &UserLimit);
+			LogOut("Server Thread/INFO", 0, "User Maximum Limit was set to %d.", UserLimit);
+		}
 		else if(strcmp(lpstrCommand, "help") == 0) {
 			LogOut("Server Thread/INFO", 0, "Commands: \n\
   ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName>\n\
-  blacklist -> Manage the blacklist, Method: blacklist <add, help, list, remove> [User Name: Only add or remove option]\n\
+  blacklist -> Manage the blacklist, Method: blacklist <add, disable, enable, help, list, remove> [User Name: Only add or remove option]\n\
   exit -> Stop the server, Method: exit\n\
   help -> Show this help text, Method: help\n\
   list -> List the users, Method: list\n\
   kick -> Kick user out of the room, Method: kick <User Name>\n\
-  whitelist -> Manage the whitelist, Method: whitelist <add, help, list, remove> [User Name: Only add or remove option]");
+  whitelist -> Manage the whitelist, Method: whitelist <add, disable, enable, help, list, remove> [User Name: Only add or remove option]");
 		}
 		else {
 			LogOut("Server Thread/ERROR", 0, "%s<--Unknown Command", lpstrCommand);
@@ -292,7 +318,7 @@ void* SocketHandler(void* lParam) {
 			break;
 		}
 		else if(iResult > 0) {
-			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && beLogined == 0) {
+			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && beLogined == 0) {
 				send(ClientSocket, "\x4|ERR_LOGIN_FIRST", 17, 0);//The client has problem could do this
 			}
 			else switch(ReceiveData[0]) {
@@ -306,6 +332,11 @@ void* SocketHandler(void* lParam) {
 						}
 						recv(ClientSocket, ReceiveData, 128, 0);
 						if(strcmp(ReceiveData, InvitationCode) == 0) {
+							if(UsersCount == UserLimit) {
+								send(ClientSocket, "\x7|ERR_USERS_MAXLIMIT", 20, 0);
+								closesocket(ClientSocket);
+								return NULL;
+							}
 							unsigned char BytesOfUserName, State = 0x00;
 							recv(ClientSocket, (char*)&BytesOfUserName, 1, 0);
 							UL_New = (struct ULIST*)calloc(1, sizeof(struct ULIST));
@@ -382,27 +413,31 @@ void* SocketHandler(void* lParam) {
 #else
 					__int64_t iSize;//Linux just use __int64_t
 #endif
+					unsigned int iLen, iCount = 0;
 					struct ULIST *This = UL_Head -> Next;
 					char SendMsg[4];
 					SendMsg[0] = '\xF';
 					SendMsg[1] = strlen(UL_New -> UserName);
+					recv(ClientSocket, (char*)&iLen, sizeof(iLen), 0);
 					while(This != NULL) {
 						send(This -> UserBindClient, SendMsg, 2, 0);
 						send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+						send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
 						This = This -> Next;
 					}
 					printf("<%s> ", UL_New -> UserName);//Who sent the message
-					while(1) {
+					while(iCount < iLen) {
 						memset(ReceiveData, 0, sizeof(ReceiveData));
 						iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
 						if(iResult <= 0) break;
+						iCount += iResult;
 						printf("%s", ReceiveData);//Print Message
 						This = UL_Head -> Next;
 						while(This != NULL) {
 							send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
 							This = This -> Next;
 						}
-						if(iResult < sizeof(ReceiveData) - 1) break;
+						//if(iResult < sizeof(ReceiveData) - 1) break;
 					}
 					printf("\n");
 					break;
@@ -422,6 +457,12 @@ void* SocketHandler(void* lParam) {
 						This = This -> Next;
 					}
 					//send(ClientSocket, "", 1, 0);
+					break;
+				}
+				case 0xE: {//Query some information from server
+					send(ClientSocket, "\xE", 1, 0);
+					send(ClientSocket, (const char*)&UsersCount, sizeof(UsersCount), 0);
+					send(ClientSocket, (const char*)&UserLimit, sizeof(UserLimit), 0);
 					break;
 				}
 				case 0xF: {//Exit
@@ -500,7 +541,7 @@ void* SocketHandler(void* lParam) {
 }
 int main() {
 	int iSendResult, iResult, iEnum, iTmp;
-	unsigned char ICSize;
+	unsigned char ICSize, ICSize2;
 	FILE *lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\config.nchatserver"
@@ -513,6 +554,7 @@ int main() {
 		if(memcmp(InvitationCode, "NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", 25) == 0) {
 			fread(&ListenPort, sizeof(ListenPort), 1, lpConfig);
 			fread(&ICSize, sizeof(ICSize), 1, lpConfig);
+			ICSize2 = ICSize;
 			if(ICSize > 128) {
 				LogOut("Server Thread/WARN", 0, "The size of InvitationCode cannot be larger than 128.");
 				for(iEnum = 0; iEnum < 128; iEnum++) {
@@ -523,6 +565,8 @@ int main() {
 				}
 			}
 			else fread(InvitationCode, sizeof(char), ICSize, lpConfig);
+			fseek(lpConfig, 284, SEEK_SET);
+			fread(&UserLimit, sizeof(UserLimit), 1, lpConfig);
 		} 
 		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
 		fclose(lpConfig);
@@ -642,6 +686,22 @@ int main() {
 	WSACleanup();
 #endif
 	LogOut("Server Close/INFO", 0, "Stopping the Server");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\config.nchatserver"
+#else
+	"configs/config.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite("NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", sizeof(char), 25, lpConfig);
+		fwrite(&ListenPort, sizeof(ListenPort), 1, lpConfig);
+		fwrite(&ICSize2, sizeof(ICSize2), 1, lpConfig);
+		fwrite(InvitationCode, sizeof(char), 256, lpConfig);
+		fwrite(&UserLimit, sizeof(UserLimit), 1, lpConfig);
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Main Config file saved.");
+	}
 	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\blacklist.nchatserver"
