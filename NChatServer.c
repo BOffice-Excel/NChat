@@ -3,11 +3,11 @@
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #else
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<arpa/inet.h>
-#include<netinet/in.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #ifndef SOCKET
 #if 1
 typedef unsigned long long	SOCKET;
@@ -30,8 +30,8 @@ typedef long long		SOCKET;
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
-char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList;
-const char *VersionData = "\x1\x1\x5";
+char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
+const char *VersionData = "\x1\x1\x6";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -39,6 +39,14 @@ struct ULIST{
 }*UL_Head, *UL_Last;
 unsigned int UsersCount = 0, UserLimit;
 SOCKET ListenSocket;
+pthread_mutex_t thread_lock;
+int send_lock(SOCKET s, const char *buf, int len, int flags) {
+	pthread_mutex_lock(&thread_lock);
+	int iResult = send(s, buf, len, flags);
+	pthread_mutex_unlock(&thread_lock);
+	return iResult;
+}
+#define send send_lock
 void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
 	va_list v;
 	va_start(v, Format);
@@ -289,15 +297,29 @@ void* InputThread(void* lParam) {
 			sscanf(lpstrInput + 6, "%d", &UserLimit);
 			LogOut("Server Thread/INFO", 0, "User Maximum Limit was set to %d.", UserLimit);
 		}
+		else if(strcmp(lpstrCommand, "roomname") == 0) {
+			if(lpstrInput[8] != ' ') {
+				LogOut("Server Thread/INFO", 0, "Chat Room Name: %s", RoomName);
+				continue;
+			}
+			if(strlen(lpstrInput + 9) > 255) {
+				LogOut("Server Thread/ERROR", 0, "Chat Room Name Length can't be longer than 255");
+				continue;
+			}
+			strcpy(RoomName, lpstrInput + 9);
+			LogOut("Server Thread/INFO", 0, "Chat Room Name has been changed to %s", RoomName);
+		}
 		else if(strcmp(lpstrCommand, "help") == 0) {
 			LogOut("Server Thread/INFO", 0, "Commands: \n\
-  ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName>\n\
-  blacklist -> Manage the blacklist, Method: blacklist <add, disable, enable, help, list, remove> [User Name: Only add or remove option]\n\
+  ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName: String>\n\
+  blacklist -> Manage the blacklist, Method: blacklist <add, disable, enable, help, list, remove> [User Name(Only add or remove option): String]\n\
   exit -> Stop the server, Method: exit\n\
   help -> Show this help text, Method: help\n\
+  limit -> Set or query a limit on the number of room users, Method: limit [New Limit on the Number of Users: Int]\n\
   list -> List the users, Method: list\n\
-  kick -> Kick user out of the room, Method: kick <User Name>\n\
-  whitelist -> Manage the whitelist, Method: whitelist <add, disable, enable, help, list, remove> [User Name: Only add or remove option]");
+  kick -> Kick user out of the room, Method: kick <User Name: String>\n\
+  roomname -> Set or query the chat room name, Method: roomname [New Room Name: String]\n\
+  whitelist -> Manage the whitelist, Method: whitelist <add, disable, enable, help, list, remove> [User Name(Only add or remove option): String]");
 		}
 		else {
 			LogOut("Server Thread/ERROR", 0, "%s<--Unknown Command", lpstrCommand);
@@ -463,6 +485,9 @@ void* SocketHandler(void* lParam) {
 					send(ClientSocket, "\xE", 1, 0);
 					send(ClientSocket, (const char*)&UsersCount, sizeof(UsersCount), 0);
 					send(ClientSocket, (const char*)&UserLimit, sizeof(UserLimit), 0);
+					char Length = strlen(RoomName);
+					send(ClientSocket, &Length, 1, 0);
+					send(ClientSocket, RoomName, Length, 0);
 					break;
 				}
 				case 0xF: {//Exit
@@ -567,6 +592,7 @@ int main() {
 			else fread(InvitationCode, sizeof(char), ICSize, lpConfig);
 			fseek(lpConfig, 284, SEEK_SET);
 			fread(&UserLimit, sizeof(UserLimit), 1, lpConfig);
+			fread(RoomName, sizeof(char), 256, lpConfig);
 		} 
 		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
 		fclose(lpConfig);
@@ -667,6 +693,7 @@ int main() {
 	LogOut("Server Startup/INFO", 0, "Set queue of listening successfully.");
 	LogOut("Server Startup/INFO", 0, "Your Invitation Code is %s.", InvitationCode);
     LogOut("Server Startup/INFO", 0, "Listening on http://localhost:%d...", ListenPort);
+    pthread_mutex_init(&thread_lock, NULL);
     pthread_t ThreadId;
     pthread_create(&ThreadId, NULL, InputThread, NULL);
 	while(1) {
@@ -682,6 +709,7 @@ int main() {
 		pthread_create(&Handler, NULL, SocketHandler, (void*)ClientSocket); 
 	}
 	closesocket(ListenSocket);
+	pthread_mutex_destroy(&thread_lock);
 #ifdef _WIN32 //Windows Clean Up
 	WSACleanup();
 #endif
@@ -699,6 +727,7 @@ int main() {
 		fwrite(&ICSize2, sizeof(ICSize2), 1, lpConfig);
 		fwrite(InvitationCode, sizeof(char), 256, lpConfig);
 		fwrite(&UserLimit, sizeof(UserLimit), 1, lpConfig);
+		fwrite(RoomName, sizeof(char), 256, lpConfig);
 		fclose(lpConfig);
 		LogOut("Server Close/INFO", 0, "Main Config file saved.");
 	}

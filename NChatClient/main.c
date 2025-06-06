@@ -369,10 +369,11 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					break;
 				}
 				case 7: {
-					char IP[32767], Port[32767], Message[65564], Recv;
+					char IP[32767], Port[32767], Message[65564], Recv, ChatRoomName[512];
 					unsigned int UserLimit = 0, UserCount = 0;
 					memset(IP, 0, sizeof(IP));
 					memset(Port, 0, sizeof(Port));
+					memset(ChatRoomName, 0, sizeof(ChatRoomName));
 					GetDlgItemTextA(hWnd, 4, IP, sizeof(IP));
 					GetDlgItemTextA(hWnd, 5, Port, sizeof(Port));
 					struct addrinfo hints, *res;
@@ -390,18 +391,20 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					    MessageBox(hWnd, "Socket Failed!", "Query Information Failed!", MB_ICONERROR);
 				        return FALSE;
 				    }
-				    int iResult = connect(sockfd2, res->ai_addr, res->ai_addrlen), iLen = strlen(Name);
+				    int iResult = connect(sockfd2, res -> ai_addr, res -> ai_addrlen), iLen = strlen(Name);
 				    if(iResult == SOCKET_ERROR) {
 					    MessageBox(hWnd, "Connect Failed!", "Query Information Failed!", MB_ICONERROR);
-						closesocket(sockfd);
+						closesocket(sockfd2);
 				    	return FALSE;
 					}
 					send(sockfd2, "\xE", 1, 0);
 					recv(sockfd2, &Recv, sizeof(Recv), 0);
 					recv(sockfd2, (char*)&UserCount, sizeof(UserCount), 0);
 					recv(sockfd2, (char*)&UserLimit, sizeof(UserLimit), 0);
-					closesocket(sockfd);
-					sprintf(Message, "Server Information:\r\nUser: %u/%u", UserCount, UserLimit);
+					recv(sockfd2, &Recv, 1, 0);
+					recv(sockfd2, ChatRoomName, Recv, 0);
+					closesocket(sockfd2);
+					sprintf(Message, "Server Information:\r\nUser: %u/%u\r\nName: %s", UserCount, UserLimit, ChatRoomName);
 					SetDlgItemText(hWnd, 6, Message);
 					break;
 				}
@@ -472,7 +475,7 @@ LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					}
 					char Buffer[114514];
 					GetDlgItemText(hWnd,2, Buffer, 114514);
-					printf("%s %d\n", Buffer, SendDlgItemMessage(hWnd, 2, CB_GETCURSEL, 0, 0));
+					//printf("%s %d\n", Buffer, SendDlgItemMessage(hWnd, 2, CB_GETCURSEL, 0, 0));
 					if(Signin(IP, Port, Name, InvitationCode) == TRUE) {
 						DestroyWindow(hWnd);
 						PostQuitMessage(1);
@@ -557,9 +560,49 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)4, NULL, NULL);
 			CreateWindowExA(0, "STATIC", "Server Name: ",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)5, NULL, NULL);
-			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "",
+			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", Name,
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)6, NULL, NULL);
-			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "",
+			char Recv, ChatRoomName[512], Message__[65564];
+			unsigned int UserLimit = 0, UserCount = 0;
+			memset(ChatRoomName, 0, sizeof(ChatRoomName));
+			struct addrinfo hints, *res;
+			int stat;
+			memset(&hints, 0, sizeof hints);
+			hints.ai_family = AF_UNSPEC;
+			hints.ai_socktype = SOCK_STREAM;
+			if ((stat = getaddrinfo(IP, Port, &hints, &res)) != 0) {
+			    sprintf(Message__, "Getaddrinfo Failed: %s(%d)\n", gai_strerror(stat), stat);
+			    MessageBox(hWnd, Message__, "Query Information Failed!", MB_ICONERROR);
+			    strcpy(ChatRoomName, "UNKNOWN");
+			    //return FALSE;
+			}
+			else {
+				SOCKET sockfd2 = socket(res -> ai_family, res -> ai_socktype, res -> ai_protocol);
+				if(sockfd2 == INVALID_SOCKET) {
+				    MessageBox(hWnd, "Socket Failed!", "Query Information Failed!", MB_ICONERROR);
+				    strcpy(ChatRoomName, "UNKNOWN");
+			        //return FALSE;
+			    }
+			    else {
+				    int iResult = connect(sockfd2, res -> ai_addr, res -> ai_addrlen), iLen = strlen(Name);
+				    if(iResult == SOCKET_ERROR) {
+					    MessageBox(hWnd, "Connect Failed!", "Query Information Failed!", MB_ICONERROR);
+						closesocket(sockfd2);
+					    strcpy(ChatRoomName, "UNKNOWN");
+				    	//return FALSE;
+					}
+					else {
+						send(sockfd2, "\xE", 1, 0);
+						recv(sockfd2, &Recv, sizeof(Recv), 0);
+						recv(sockfd2, (char*)&UserCount, sizeof(UserCount), 0);
+						recv(sockfd2, (char*)&UserLimit, sizeof(UserLimit), 0);
+						recv(sockfd2, &Recv, 1, 0);
+						recv(sockfd2, ChatRoomName, Recv, 0);
+						closesocket(sockfd2);
+					}
+				}
+			}
+			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", ChatRoomName,
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)7, NULL, NULL);
 			CreateWindowExA(0, WC_LISTVIEWA, "Users List",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | LVS_SINGLESEL, 0, 0, 0, 0, hWnd, (HMENU)8, NULL, NULL);
