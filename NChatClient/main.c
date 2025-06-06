@@ -1,8 +1,8 @@
+#define NTDDI_VERSION 0x06010000
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
 #include <pthread.h>
-#include <windows.h>
 #include <uxtheme.h>
 #include "..\Json.h"
 #include "NChatClient-GUI_private.h"
@@ -17,8 +17,9 @@ typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
 char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16];
 int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UseDarkMode = 1;
 unsigned int UsersCount = 0;
-HWND hWndMain;
+HWND hWndMain, hWndNotify;
 HIMAGELIST hImageList;
+NOTIFYICONDATAA nid;
 struct People {
 	char Name[512];
 	struct People *Next, *Prev;
@@ -33,6 +34,22 @@ struct CHATROOM {
 }ChatRooms[128];
 HFONT hFont, hIconFont;
 SOCKET sockfd;
+BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details) {
+	NOTIFYICONDATAA nid2;
+	memset(&nid2, 0, sizeof(nid2));
+	nid2.cbSize = sizeof(nid);
+	nid2.uFlags = NIF_INFO | NIF_GUID;
+	nid2.guidItem = nid.guidItem;
+	nid2.dwInfoFlags = dwIcon | NIIF_RESPECT_QUIET_TIME;
+	nid2.hIcon = nid.hIcon;
+	strcpy(nid2.szInfoTitle, Title);
+	strncpy(nid2.szInfo, Details, sizeof(nid2.szInfo) - 1);
+	if(strlen(Details) > 50) {
+		nid2.szInfo[50] = nid2.szInfo[49] = nid2.szInfo[48] = '.';
+		nid2.szInfo[51] = '\0';
+	}
+	return Shell_NotifyIconA(NIM_MODIFY, &nid2);
+}
 void RecvFull(SOCKET sockfd, char *Buffer, int size) {
 	int iEnum = 0, DataCount = recv(sockfd, Buffer + iEnum, size, 0);
 	while(DataCount > 0) {
@@ -125,6 +142,7 @@ void* RecvMessageThread(void* lParam) {
 					lvi.iImage = i + 2;
 		    		ListView_InsertItem(GetDlgItem(hWndMain, 8), &lvi);
 				}
+				ShowToastMessage(NIIF_NONE, "Message", Str);
 				break;
 			}
 			case '\xB': {
@@ -149,10 +167,12 @@ void* RecvMessageThread(void* lParam) {
 				if(i != ListView_GetItemCount(GetDlgItem(hWndMain, 8))) {
 					ListView_DeleteItem(GetDlgItem(hWndMain, 8), i);
 				}
+				ShowToastMessage(NIIF_NONE, "Message", Str);
 				break;
 			}
 			case '\xC': {
 				EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
+				ShowToastMessage(NIIF_INFO, "You has kicked out by server!", "Connection closed by server");
 				MessageBox(NULL, "You has kicked out by server!", "Connection closed by server", MB_ICONINFORMATION);
 				DestroyWindow(hWndMain);
 				SendMessage(hWndMain, WM_DESTROY, 0, 0);
@@ -231,6 +251,7 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				lvi.iImage = i;
 				printf("%s\n", lvi.pszText);
+				ShowToastMessage(NIIF_NONE, "New message", lvi.pszText);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
 				free(lvi.pszText);
 				break;
@@ -708,8 +729,51 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			//DrawState(hDC, NULL, NULL, (LPARAM)GetPropA(hwnd, "bitmap"), 0, 0, 0, 64, 64, DST_BITMAP);
 			break;
 		}
+		case WM_CLOSE: {
+			ShowWindow(hWnd, SW_HIDE);
+			break;
+		}
+		default: return DefWindowProc(hWnd, Message, wParam, lParam);
+	}
+	return 0;
+}
+LRESULT CALLBACK NotifyProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) {
+	switch(Message) {
 		case WM_DESTROY: {
 			PostQuitMessage(0);
+			break;
+		}
+		case WM_COMMAND: {
+			switch(LOWORD(wParam)) {
+				case 9: {
+					SendMessage(hWnd, WM_APP + 255, 0, NIN_SELECT);
+					break;
+				}
+				case 10: {
+					DestroyWindow(hWnd);
+					break;
+				}
+			}
+			break;
+		}
+		case WM_APP + 255: {
+			switch(LOWORD(lParam)) {
+				case NIN_SELECT:
+				case NIN_BALLOONUSERCLICK: {
+					SwitchToThisWindow(hWndMain, FALSE);
+					ShowWindow(hWndMain, SW_SHOW);
+					break;
+				}
+				case WM_CONTEXTMENU: {
+					SetForegroundWindow(hWnd);
+					HMENU hMenu = CreatePopupMenu();
+					AppendMenuA(hMenu, MF_STRING, 9, "&Switch To Chat Window");
+					AppendMenuA(hMenu, MF_STRING, 10, "&Exit");
+                	TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON | TPM_RIGHTALIGN, LOWORD(wParam), HIWORD(wParam), hWnd, NULL);
+                	DestroyMenu(hMenu);
+					break;
+				}
+			}
 			break;
 		}
 		default: return DefWindowProc(hWnd, Message, wParam, lParam);
@@ -789,13 +853,19 @@ int main() {
 	wc.lpszClassName = "NChat-Client-Login";
 	wc.hIcon		 = LoadIcon(wc.hInstance, "A"); /* use "A" as icon name when you want to use the project icon */
 	wc.hIconSm		 = LoadIcon(wc.hInstance, "A"); /* as above */
-	if(!RegisterClassEx(&wc)) {
+	if(RegisterClassEx(&wc) == FALSE) {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return 0;
 	}
 	wc.lpfnWndProc	 = WndProc;
 	wc.lpszClassName = "NChat-Client";
-	if(!RegisterClassEx(&wc)) {
+	if(RegisterClassEx(&wc) == FALSE) {
+		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
+	wc.lpfnWndProc	 = NotifyProc;
+	wc.lpszClassName = "NChat-Notify";
+	if(RegisterClassEx(&wc) == FALSE) {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;
 	}
@@ -845,6 +915,21 @@ int main() {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;
 	}
+	hWndNotify = CreateWindowEx(0, "NChat-Notify", "NChat-NotifyHandler", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
+	if(hWndNotify == NULL) {
+		MessageBox(NULL, "Notification Handler Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
+	nid.cbSize = sizeof(nid);
+	nid.hWnd = hWndNotify;
+	nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP | NIF_GUID;
+	nid.hIcon = wc.hIcon;
+	nid.uVersion = NOTIFYICON_VERSION_4;
+	nid.dwInfoFlags = NIIF_INFO | NIIF_RESPECT_QUIET_TIME;
+	nid.uCallbackMessage = WM_APP + 255;
+	CoCreateGuid(&nid.guidItem);
+	Shell_NotifyIconA(NIM_ADD, &nid);
+	Shell_NotifyIconA(NIM_SETVERSION, &nid);
 	pthread_t MessageHandler_t;
 	pthread_create(&MessageHandler_t, NULL, RecvMessageThread, NULL);
 	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
@@ -855,5 +940,6 @@ int main() {
 	}
 	closesocket(sockfd);
 	WSACleanup();
+	Shell_NotifyIconA(NIM_DELETE, &nid);
 	return Msg.wParam;
 }
