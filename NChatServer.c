@@ -31,7 +31,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x1\x7";
+const char *VersionData = "\x1\x1\x8";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -309,6 +309,21 @@ void* InputThread(void* lParam) {
 			strcpy(RoomName, lpstrInput + 9);
 			LogOut("Server Thread/INFO", 0, "Chat Room Name has been changed to %s", RoomName);
 		}
+		else if(strcmp(lpstrCommand, "say") == 0) {
+			if(lpstrInput[3] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command say!");
+				continue;
+			}
+			struct ULIST *This = UL_Head;
+			int iLength = strlen(lpstrInput + 4);
+			while(This != NULL) {
+				send(This -> UserBindClient, "\xF\x6Server", 8, 0);
+				send(This -> UserBindClient, (const char*)&iLength, sizeof(iLength), 0);
+				send(This -> UserBindClient, lpstrInput + 4, iLength, 0);
+				This = This -> Next;
+			}
+			LogOut("Server Thread/INFO", 0, "<Server> %s", lpstrInput + 4);
+		}
 		else if(strcmp(lpstrCommand, "help") == 0) {
 			LogOut("Server Thread/INFO", 0, "Commands: \n\
   ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName: String>\n\
@@ -340,10 +355,14 @@ void* SocketHandler(void* lParam) {
 			break;
 		}
 		else if(iResult > 0) {
-			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && beLogined == 0) {
+			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && ReceiveData[0] != '\x9' && beLogined == 0) {
 				send(ClientSocket, "\x4|ERR_LOGIN_FIRST", 17, 0);//The client has problem could do this
 			}
 			else switch(ReceiveData[0]) {
+				case 0x9: {//For testing is keeping alive
+					send(ClientSocket, "\x9", 1, 0);
+					break;
+				}
 				case 0xA: {//Login, Verify invitation code
 					if(beLogined == 0) {
 						recv(ClientSocket, ReceiveData, 3, 0);

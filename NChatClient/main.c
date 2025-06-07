@@ -14,7 +14,7 @@ typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     PUINT puColumns;
     int   *piColFmt;
 } NEWLVTILEINFO, *PNEWLVTILEINFO;
-char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16];
+char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16], AliveInLast5Minute = 0, InFocus;
 int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UseDarkMode = 1;
 unsigned int UsersCount = 0;
 HWND hWndMain, hWndNotify;
@@ -35,6 +35,7 @@ struct CHATROOM {
 HFONT hFont, hIconFont;
 SOCKET sockfd;
 BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details) {
+	if(InFocus == 1) return TRUE;
 	NOTIFYICONDATAA nid2;
 	memset(&nid2, 0, sizeof(nid2));
 	nid2.cbSize = sizeof(nid);
@@ -45,8 +46,20 @@ BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details) {
 	strcpy(nid2.szInfoTitle, Title);
 	strncpy(nid2.szInfo, Details, sizeof(nid2.szInfo) - 1);
 	if(strlen(Details) > 50) {
-		nid2.szInfo[50] = nid2.szInfo[49] = nid2.szInfo[48] = '.';
-		nid2.szInfo[51] = '\0';
+		int i = 0;
+		if(nid2.szInfo[48] < 0) {
+			i = 47;
+			while(i >= 0 && nid2.szInfo[i] < 0) i -= 1;
+			i = 48 - i;
+		}
+		if(i % 2 == 1) {
+			nid2.szInfo[50] = nid2.szInfo[49] = nid2.szInfo[48] = '.';
+			nid2.szInfo[51] = '\0';
+		}
+		else {
+			nid2.szInfo[49] = nid2.szInfo[48] = nid2.szInfo[47] = '.';
+			nid2.szInfo[50] = '\0';
+		}
 	}
 	return Shell_NotifyIconA(NIM_MODIFY, &nid2);
 }
@@ -101,6 +114,10 @@ void* RecvMessageThread(void* lParam) {
 	memset(ReceiveData, 0, sizeof(ReceiveData));
 	while(recv(sockfd, ReceiveData, 1, 0) > 0) {
 		switch(ReceiveData[0]) {
+			case '\x9': {
+				//Empty, testing is the server keeping alive
+				break;
+			}
 			case '\xA': {
 				char Str[114514];
 				recv(sockfd, ReceiveData, 1, 0);
@@ -131,6 +148,7 @@ void* RecvMessageThread(void* lParam) {
 		    	lvi.mask = LVIF_TEXT;
 		    	int k;
 				lvi.cchTextMax = 114514;
+				ShowToastMessage(NIIF_NONE, "Message", Str);
 				for(k = 0; k < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); k++) {
 					lvi.iItem = k;
 					ListView_GetItem(GetDlgItem(hWndMain, 8), &lvi);
@@ -142,7 +160,6 @@ void* RecvMessageThread(void* lParam) {
 					lvi.iImage = i + 2;
 		    		ListView_InsertItem(GetDlgItem(hWndMain, 8), &lvi);
 				}
-				ShowToastMessage(NIIF_NONE, "Message", Str);
 				break;
 			}
 			case '\xB': {
@@ -157,6 +174,7 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				ShowToastMessage(NIIF_NONE, "Message", Str);
 				int i;
 				lvi.cchTextMax = 114514;
 				for(i = 0; i < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); i++) {
@@ -167,7 +185,6 @@ void* RecvMessageThread(void* lParam) {
 				if(i != ListView_GetItemCount(GetDlgItem(hWndMain, 8))) {
 					ListView_DeleteItem(GetDlgItem(hWndMain, 8), i);
 				}
-				ShowToastMessage(NIIF_NONE, "Message", Str);
 				break;
 			}
 			case '\xC': {
@@ -219,6 +236,10 @@ void* RecvMessageThread(void* lParam) {
 				ListView_SetImageList(GetDlgItem(hWndMain, 8), hImageList, LVSIL_NORMAL);
 				break;
 			}
+			case '\xE': {
+				
+				break;
+			}
 			case '\xF': {
 				unsigned int iLen, iCount = 0;
 				recv(sockfd, ReceiveData, 1, 0);
@@ -251,12 +272,13 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				lvi.iImage = i;
 				printf("%s\n", lvi.pszText);
-				ShowToastMessage(NIIF_NONE, "New message", lvi.pszText);
+				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
 				free(lvi.pszText);
 				break;
 			}
 		}
+		AliveInLast5Minute = 1;
 		if(IsDlgButtonChecked(hWndMain, 10) == BST_CHECKED) {
 			int iItemCount = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 			if (iItemCount > 0) {
@@ -268,8 +290,7 @@ void* RecvMessageThread(void* lParam) {
 	}
 	EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
 	if(MessageBox(hWndMain, "Connection closed by server.\nDo you want do quit from this page?", "Connection interrupted", MB_ICONQUESTION | MB_YESNO) == IDYES) {
-		DestroyWindow(hWndMain);
-		SendMessage(hWndMain, WM_DESTROY, 0, 0);
+		SendMessage(hWndNotify, WM_COMMAND, 10, 0);
 	}
 	send(sockfd, "\xF", 1, 0);
     closesocket(sockfd);
@@ -631,8 +652,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)9, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Auto Scroll To Bottom",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Always show notifications",
+				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)11, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
 			CheckDlgButton(hWnd, 10, BST_CHECKED);
+			CheckDlgButton(hWnd, 11, BST_CHECKED);
 			ListView_SetView(GetDlgItem(hWnd, 2), LV_VIEW_TILE);
 			if(UseDarkMode == 1) {
 				ListView_SetBkColor(GetDlgItem(hWnd, 2), RGB(25, 25, 25));
@@ -647,10 +671,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				ListView_SetTextColor(GetDlgItem(hWnd, 8), RGB(0, 0, 0));
 			}
 			int i;
-			for(i = 1; i <= 10; i++) {
+			for(i = 1; i <= 11; i++) {
 				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
 				SetWindowTheme(GetDlgItem(hWnd, i), (UseDarkMode == 0) ? L"Explorer" : L"DarkMode_Explorer", NULL);
 			}
+			SetTimer(hWnd, 1, 300000, NULL);
 			break;
 		}
 		case WM_SIZE: {
@@ -666,6 +691,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			SetWindowPos(GetDlgItem(hWnd, 8), NULL, (Rect.right - 110) * 0.7 + 40, 110, (Rect.right - 110) * 0.3, (Rect.bottom - 130) * 0.6, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 9), NULL, (Rect.right - 110) * 0.7 + 40, Rect.bottom - 50, (Rect.right - 110) * 0.1, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 10), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 130, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 11), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 160, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
 			LVTILEVIEWINFO tileViewInfo;
             tileViewInfo.cbSize = sizeof(LVTILEVIEWINFO);
             tileViewInfo.dwFlags = LVTVIF_FIXEDSIZE;
@@ -726,7 +752,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			break;
 		}
 		case WM_TIMER: {
+			switch(wParam) {
+				case 1: {
+					if(AliveInLast5Minute == 0) {
+						KillTimer(hWnd, 1);
+						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed");
+						if(MessageBox(hWnd, "Error: The client and server have been disconnected.\nDo you want to stay in this page?", "Connection Closed", MB_ICONQUESTION | MB_YESNO) != IDYES) {
+							SendMessage(hWndNotify, WM_COMMAND, 10, 0);
+						}
+						break;
+					}
+					AliveInLast5Minute = 0;
+					if(send(sockfd, "\x9", 1, 0) < 0) {
+						KillTimer(hWnd, 1);
+						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed");
+						if(MessageBox(hWnd, "Error: The client and server have been disconnected.\nDo you want to stay in this page?", "Connection Closed", MB_ICONQUESTION | MB_YESNO) != IDYES) {
+							SendMessage(hWndNotify, WM_COMMAND, 10, 0);
+						}
+					}
+					break;
+				}
+			}
 			//DrawState(hDC, NULL, NULL, (LPARAM)GetPropA(hwnd, "bitmap"), 0, 0, 0, 64, 64, DST_BITMAP);
+			break;
+		}
+		case WM_SETFOCUS: {
+			InFocus = 1;
+			break;
+		}
+		case WM_KILLFOCUS: {
+			if(GetParent((HWND)wParam) != hWnd) InFocus = 0;
 			break;
 		}
 		case WM_CLOSE: {
@@ -910,7 +965,7 @@ int main() {
 	if(Msg.wParam == 0) return 0;
 	hWndMain = CreateWindowEx(0, "NChat-Client", "NChat",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION | WS_MAXIMIZEBOX | WS_THICKFRAME,
-		CW_USEDEFAULT, CW_USEDEFAULT, 1536, 768, NULL, NULL, NULL, NULL);
+		CW_USEDEFAULT, CW_USEDEFAULT, 1000, 512, NULL, NULL, NULL, NULL);
 	if(hWndMain == NULL) {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;
