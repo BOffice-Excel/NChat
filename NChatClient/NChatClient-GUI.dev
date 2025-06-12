@@ -11,7 +11,7 @@ ResourceIncludes=
 MakeIncludes=
 Compiler=
 CppCompiler=
-Linker=libws2_32.a_@@_libgdi32.a_@@_libuxtheme.a_@@_libcomctl32.a_@@_libole32.a_@@_
+Linker=libws2_32.a_@@_libgdi32.a_@@_libuxtheme.a_@@_libcomctl32.a_@@_libole32.a_@@_libcomdlg32.a_@@_
 IsCpp=0
 Icon=NChatClient-GUI.ico
 ExeOutput=
@@ -33,20 +33,20 @@ UnitCount=1
 
 [VersionInfo]
 Major=1
-Minor=1
-Release=7
-Build=157
+Minor=2
+Release=0
+Build=240
 LanguageID=1033
 CharsetID=1252
 CompanyName=NotMyFaults
-FileVersion=1.1.7.157
+FileVersion=1.2.0.240
 FileDescription=NChat Client
 InternalName=NChatClient
 LegalCopyright=
 LegalTrademarks=
 OriginalFilename=NChatClient-GUI.exe
 ProductName=NChat
-ProductVersion=1.1.7.157
+ProductVersion=1.2.0.240
 AutoIncBuildNr=1
 SyncProduct=1
 

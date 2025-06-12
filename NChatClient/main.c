@@ -7,6 +7,10 @@
 #include "..\Json.h"
 #include "NChatClient-GUI_private.h"
 #define key_press(key) (GetAsyncKeyState(key)&0x8000) //Define macro for detect keyboard
+enum MESSAGETYPE {
+	MT_PLAINTEXT = 0,
+	MT_FILE
+};
 typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     UINT  cbSize;
     int   iItem;
@@ -34,8 +38,8 @@ struct CHATROOM {
 }ChatRooms[128];
 HFONT hFont, hIconFont;
 SOCKET sockfd;
-BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details) {
-	if(InFocus == 1) return TRUE;
+BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL bAlwaysShow) {
+	if(bAlwaysShow == 0 && InFocus == 1) return TRUE;
 	NOTIFYICONDATAA nid2;
 	memset(&nid2, 0, sizeof(nid2));
 	nid2.cbSize = sizeof(nid);
@@ -45,20 +49,22 @@ BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details) {
 	nid2.hIcon = nid.hIcon;
 	strcpy(nid2.szInfoTitle, Title);
 	strncpy(nid2.szInfo, Details, sizeof(nid2.szInfo) - 1);
-	if(strlen(Details) > 50) {
-		int i = 0;
-		if(nid2.szInfo[48] < 0) {
-			i = 47;
-			while(i >= 0 && nid2.szInfo[i] < 0) i -= 1;
-			i = 48 - i;
-		}
-		if(i % 2 == 1) {
-			nid2.szInfo[50] = nid2.szInfo[49] = nid2.szInfo[48] = '.';
-			nid2.szInfo[51] = '\0';
-		}
-		else {
-			nid2.szInfo[49] = nid2.szInfo[48] = nid2.szInfo[47] = '.';
-			nid2.szInfo[50] = '\0';
+	if(bAlwaysShow == 0) {
+		if(strlen(Details) > 50) {
+			int i = 0;
+			if(nid2.szInfo[48] < 0) {
+				i = 47;
+				while(i >= 0 && nid2.szInfo[i] < 0) i -= 1;
+				i = 48 - i;
+			}
+			if(i % 2 == 1) {
+				nid2.szInfo[50] = nid2.szInfo[49] = nid2.szInfo[48] = '.';
+				nid2.szInfo[51] = '\0';
+			}
+			else {
+				nid2.szInfo[49] = nid2.szInfo[48] = nid2.szInfo[47] = '.';
+				nid2.szInfo[50] = '\0';
+			}
 		}
 	}
 	return Shell_NotifyIconA(NIM_MODIFY, &nid2);
@@ -148,7 +154,7 @@ void* RecvMessageThread(void* lParam) {
 		    	lvi.mask = LVIF_TEXT;
 		    	int k;
 				lvi.cchTextMax = 114514;
-				ShowToastMessage(NIIF_NONE, "Message", Str);
+				ShowToastMessage(NIIF_NONE, "Message", Str, 0);
 				for(k = 0; k < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); k++) {
 					lvi.iItem = k;
 					ListView_GetItem(GetDlgItem(hWndMain, 8), &lvi);
@@ -174,7 +180,7 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
-				ShowToastMessage(NIIF_NONE, "Message", Str);
+				ShowToastMessage(NIIF_NONE, "Message", Str, 0);
 				int i;
 				lvi.cchTextMax = 114514;
 				for(i = 0; i < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); i++) {
@@ -189,10 +195,9 @@ void* RecvMessageThread(void* lParam) {
 			}
 			case '\xC': {
 				EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
-				ShowToastMessage(NIIF_INFO, "You has kicked out by server!", "Connection closed by server");
+				ShowToastMessage(NIIF_INFO, "You has kicked out by server!", "Connection closed by server", 1);
 				MessageBox(NULL, "You has kicked out by server!", "Connection closed by server", MB_ICONINFORMATION);
-				DestroyWindow(hWndMain);
-				SendMessage(hWndMain, WM_DESTROY, 0, 0);
+				SendMessage(hWndNotify, WM_COMMAND, 10, 0);
 				closesocket(sockfd);
 				WSACleanup();
 				return NULL;
@@ -236,8 +241,56 @@ void* RecvMessageThread(void* lParam) {
 				ListView_SetImageList(GetDlgItem(hWndMain, 8), hImageList, LVSIL_NORMAL);
 				break;
 			}
-			case '\xE': {
-				
+			case '\xE': {//File Notification
+				char UserName[512], FileName[512];
+				memset(UserName, 0, sizeof(UserName));
+				memset(FileName, 0, sizeof(FileName));
+				unsigned int FileSize;
+				unsigned char UserNameLength, FileNameLength;
+				recv(sockfd, (char*)&UserNameLength, sizeof(UserNameLength), 0);
+				recv(sockfd, UserName, UserNameLength, 0);
+				recv(sockfd, (char*)&FileNameLength, sizeof(FileNameLength), 0);
+				recv(sockfd, FileName, FileNameLength, 0);
+				recv(sockfd, (char*)&FileSize, sizeof(FileSize), 0);
+				LVITEMA lvi;
+				int i;
+				if(strcmp(UserName, "Server") == 0) i = 0;
+				else {
+					for(i = 0; i < UsersCount; i++) {
+						if(strcmp(Users[i].Name, UserName) == 0) break;
+					}
+					if(i == UsersCount) i = -1;
+					i += 2;
+				}
+				lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
+				lvi.lParam = MT_FILE;
+				lvi.iSubItem = 0;
+				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
+				lvi.iImage = i;
+				lvi.pszText = (char*)calloc(512, sizeof(char));
+				sprintf(lvi.pszText, "[File] %s", FileName);
+				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				sprintf(lvi.pszText, "%s sent a file", UserName);
+				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New file", lvi.pszText, 0);
+				lvi.iSubItem = 1;
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
+				sprintf(lvi.pszText, "%.2lf Kib", FileSize * 1.0 / 1024.0);
+				lvi.iSubItem = 2;
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 2, lvi.pszText);
+				free(lvi.pszText);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+	            lti.puColumns[2] = 3;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 3;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
 				break;
 			}
 			case '\xF': {
@@ -272,7 +325,7 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				lvi.iImage = i;
 				printf("%s\n", lvi.pszText);
-				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText);
+				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText, 0);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
 				free(lvi.pszText);
 				break;
@@ -300,6 +353,167 @@ void* RecvMessageThread(void* lParam) {
 void UpdateUsersList() {
     send(sockfd, "\xD", 1, 0);
 	return ;
+}
+void *UploadFile(void *lParam) {
+	char *FileName = (char*)lParam, *Details = (char*)calloc(32767, sizeof(char)), *ReadData = (char*)calloc(32767, sizeof(char)), ErrMsg[32767], NameLength, iReceive;
+	sprintf(Details, "File '%s' is uploading...", FileName);
+	ShowToastMessage(NIIF_INFO, "File Uploading is In Progress", Details, 1);
+	FILE* lpFile = fopen(FileName, "rb");
+	unsigned int size;
+	fseek(lpFile, 0, SEEK_END);
+	size = ftell(lpFile);
+	fseek(lpFile, 0, SEEK_SET);
+	
+	struct addrinfo hints, *res;
+	int status;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	if ((status = getaddrinfo(IP, Port, &hints, &res)) != 0) {
+	    sprintf(ErrMsg, "Getaddrinfo Failed: %s(%d)", gai_strerror(status), status);
+	    MessageBox(hWndMain, ErrMsg, "Uploaded file failed!", MB_ICONERROR);
+	    return FALSE;
+	}
+	SOCKET sockfd = socket(res -> ai_family, res -> ai_socktype, res -> ai_protocol);
+	if(sockfd == INVALID_SOCKET) {
+	    MessageBox(hWndMain, "Socket Failed!", "Uploaded file failed!", MB_ICONERROR);
+        return FALSE;
+    }
+    int iResult = connect(sockfd, res->ai_addr, res->ai_addrlen), iLen = strlen(Name);
+    if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Connect Failed!", "Uploaded file failed!", MB_ICONERROR);
+		closesocket(sockfd);
+    	return FALSE;
+	}
+    iResult = send(sockfd, "\xC", 1, 0);
+	if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Send Failed!", "Uploaded file failed!", MB_ICONERROR);
+		closesocket(sockfd);
+		return FALSE;
+    }
+    NameLength = strlen(Name);
+    send(sockfd, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd, Name, NameLength, 0);
+    recv(sockfd, &iReceive, sizeof(iReceive), 0);
+    if(iReceive != 0) {
+    	memset(Details, 0, 32767);
+    	sprintf(Details, "Error Code: %d", iReceive);
+    	recv(sockfd, Details + strlen(Details), 32767, 0);
+    	MessageBox(hWndMain, Details, "Uploaded file failed!", MB_ICONWARNING);
+    	closesocket(sockfd);
+    	fclose(lpFile);
+    	free(ReadData);
+    	free(FileName);
+    	free(Details);
+    	return NULL;
+	}
+	int i = strlen(FileName) - 1;
+	while(i >= 0 && FileName[i] != '\\') i -= 1;
+	NameLength = strlen(FileName + i + 1);
+    send(sockfd, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd, FileName + i + 1, NameLength, 0);
+    recv(sockfd, &iReceive, sizeof(iReceive), 0);
+    if(iReceive != 0) {
+    	sprintf(Details, "File uploaded failed!(Error Code: %d)", iReceive);
+    	MessageBox(hWndMain, Details, "Uploaded file failed!", MB_ICONWARNING);
+    	closesocket(sockfd);
+    	fclose(lpFile);
+    	free(ReadData);
+    	free(FileName);
+    	free(Details);
+    	return NULL;
+	}
+	send(sockfd, (const char*)&size, sizeof(size), 0);
+	while((iResult = fread(ReadData, sizeof(char), 32767, lpFile)) > 0) {
+		send(sockfd, ReadData, iResult, 0);
+	}
+	fclose(lpFile);
+	sprintf(Details, "File '%s' was uploaded.", FileName);
+	ShowToastMessage(NIIF_INFO, "File Uploaded successfully", Details, 1);
+	free(ReadData);
+	free(FileName);
+	free(Details);
+	return NULL;
+}
+void *DownloadingFileThread(void *lParam) {
+	HWND hWndOwner = (HWND)lParam;
+	char *FileName = (char*)calloc(32767, sizeof(char)), *DownloadPath = (char*)calloc(32767, sizeof(char)), *Details = (char*)calloc(32767, sizeof(char)), *ReadData = (char*)calloc(32767, sizeof(char)), ErrMsg[32767], NameLength, iReceive;
+	strcpy(FileName, (char*)GetPropA(hWndOwner, "FileName"));
+	strcpy(DownloadPath, (char*)GetPropA(hWndOwner, "DownloadPath"));
+	sprintf(Details, "File '%s' is downloading...", FileName);
+	ShowToastMessage(NIIF_INFO, "File Downloading is In Progress", Details, 1);
+	
+	struct addrinfo hints, *res;
+	int status;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	if ((status = getaddrinfo(IP, Port, &hints, &res)) != 0) {
+	    sprintf(ErrMsg, "Getaddrinfo Failed: %s(%d)", gai_strerror(status), status);
+	    MessageBox(hWndMain, ErrMsg, "Downloaded file failed!", MB_ICONERROR);
+	    return FALSE;
+	}
+	SOCKET sockfd2 = socket(res -> ai_family, res -> ai_socktype, res -> ai_protocol);
+	if(sockfd == INVALID_SOCKET) {
+	    MessageBox(hWndMain, "Socket Failed!", "Downloaded file failed!", MB_ICONERROR);
+        return FALSE;
+    }
+    int iResult = connect(sockfd2, res->ai_addr, res->ai_addrlen);
+    if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Connect Failed!", "Downloaded file failed!", MB_ICONERROR);
+		closesocket(sockfd2);
+    	return FALSE;
+	}
+    iResult = send(sockfd2, "\x10", 1, 0);
+	if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Send Failed!", "Downloaded file failed!", MB_ICONERROR);
+		closesocket(sockfd2);
+		return FALSE;
+    }
+    NameLength = strlen(Name);
+    send(sockfd2, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd2, Name, NameLength, 0);
+    recv(sockfd2, &iReceive, 1, 0);
+    if(iReceive != 0) {
+    	memset(Details, 0, 32767);
+    	sprintf(Details, "Error Code: %d", iReceive);
+    	recv(sockfd2, Details + strlen(Details), 512, 0);
+    	MessageBox(hWndMain, Details, "Downloaded file failed!", MB_ICONWARNING);
+    	closesocket(sockfd2);
+    	free(DownloadPath);
+    	free(ReadData);
+    	free(Details);
+    	return NULL;
+	}
+	NameLength = strlen(FileName);
+    send(sockfd2, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd2, FileName, NameLength, 0);
+    iReceive = 1;
+    recv(sockfd2, &iReceive, 1, 0);
+    if(iReceive != 0) {
+    	sprintf(Details, "File downloaded failed! Error Code: %d", iReceive);
+    	recv(sockfd2, Details + strlen(Details), 512, 0);
+    	MessageBox(hWndMain, Details, "Downloaded file failed!", MB_ICONWARNING);
+    	closesocket(sockfd2);
+		free(DownloadPath);
+    	free(ReadData);
+    	free(Details);
+    	return NULL;
+	}
+	FILE* lpFile = fopen(DownloadPath, "wb");
+	unsigned int Size = 0;
+	recv(sockfd2, (char*)&Size, sizeof(Size), 0);
+	while((iResult = recv(sockfd2, ReadData, 32767, 0)) > 0) {
+		fwrite(ReadData, sizeof(char), iResult, lpFile);
+	}
+	fclose(lpFile);
+	sprintf(Details, "File '%s' was downloaded.", FileName);
+	ShowToastMessage(NIIF_INFO, "File Downloaded successfully", Details, 1);
+	free(ReadData);
+	free(DownloadPath);
+	free(Details);
+	closesocket(sockfd2);
+	return NULL;
 }
 BOOL Signin(const char *IP, const char *Port, const char *Name, const char *InvitationCode) {
 	struct addrinfo hints, *res;
@@ -654,10 +868,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Always show notifications",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)11, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "Send A File",
+				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)12, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
 			CheckDlgButton(hWnd, 10, BST_CHECKED);
 			CheckDlgButton(hWnd, 11, BST_CHECKED);
 			ListView_SetView(GetDlgItem(hWnd, 2), LV_VIEW_TILE);
+			LVCOLUMN lc;
+			lc.mask = 0;
+			ListView_InsertColumn(GetDlgItem(hWnd, 2), 1, &lc);
+			ListView_InsertColumn(GetDlgItem(hWnd, 2), 2, &lc);
+			ListView_InsertColumn(GetDlgItem(hWnd, 2), 3, &lc);
 			if(UseDarkMode == 1) {
 				ListView_SetBkColor(GetDlgItem(hWnd, 2), RGB(25, 25, 25));
 				ListView_SetTextBkColor(GetDlgItem(hWnd, 2), RGB(25, 25, 25));
@@ -671,7 +892,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				ListView_SetTextColor(GetDlgItem(hWnd, 8), RGB(0, 0, 0));
 			}
 			int i;
-			for(i = 1; i <= 11; i++) {
+			for(i = 1; i <= 12; i++) {
 				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
 				SetWindowTheme(GetDlgItem(hWnd, i), (UseDarkMode == 0) ? L"Explorer" : L"DarkMode_Explorer", NULL);
 			}
@@ -692,11 +913,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			SetWindowPos(GetDlgItem(hWnd, 9), NULL, (Rect.right - 110) * 0.7 + 40, Rect.bottom - 50, (Rect.right - 110) * 0.1, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 10), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 130, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 11), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 160, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 12), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 190, (Rect.right - 110) * 0.1, 30, SWP_NOZORDER);
 			LVTILEVIEWINFO tileViewInfo;
             tileViewInfo.cbSize = sizeof(LVTILEVIEWINFO);
             tileViewInfo.dwFlags = LVTVIF_FIXEDSIZE;
             tileViewInfo.dwMask = LVTVIM_COLUMNS | LVTVIM_TILESIZE;
-            tileViewInfo.cLines = 2;
+            tileViewInfo.cLines = 3;
             tileViewInfo.sizeTile.cx = (Rect.right - 110) * 0.7 - 30;
             tileViewInfo.sizeTile.cy = 70;
             ListView_SetTileViewInfo(GetDlgItem(hWnd, 2), &tileViewInfo);//Set Tile View Information
@@ -748,6 +970,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
         			SetDlgItemTextA(hWnd, 3, "");
 					break;
 				}
+				case 12: {
+					char *FilePath = (char*)calloc(32767, sizeof(char));
+					OPENFILENAMEA ofn;
+					memset(&ofn, 0, sizeof(ofn));
+					ofn.lStructSize = sizeof(ofn);
+					ofn.lpstrFile = FilePath;
+					ofn.nMaxFile = 32767;
+					ofn.lpstrFilter = "All Files(*.*)\0*.*\0\0";
+					ofn.hwndOwner = hWnd;
+					if(GetOpenFileNameA(&ofn) == FALSE) {
+						free(FilePath);
+						break;
+					}
+					pthread_t ptid_t;
+					pthread_create(&ptid_t, NULL, UploadFile, FilePath);
+					break;
+				}
 			}
 			break;
 		}
@@ -756,7 +995,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				case 1: {
 					if(AliveInLast5Minute == 0) {
 						KillTimer(hWnd, 1);
-						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed");
+						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed", 1);
 						if(MessageBox(hWnd, "Error: The client and server have been disconnected.\nDo you want to stay in this page?", "Connection Closed", MB_ICONQUESTION | MB_YESNO) != IDYES) {
 							SendMessage(hWndNotify, WM_COMMAND, 10, 0);
 						}
@@ -765,7 +1004,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 					AliveInLast5Minute = 0;
 					if(send(sockfd, "\x9", 1, 0) < 0) {
 						KillTimer(hWnd, 1);
-						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed");
+						ShowToastMessage(NIIF_WARNING, "Error: The client and server have been disconnected.", "Connection Closed", 1);
 						if(MessageBox(hWnd, "Error: The client and server have been disconnected.\nDo you want to stay in this page?", "Connection Closed", MB_ICONQUESTION | MB_YESNO) != IDYES) {
 							SendMessage(hWndNotify, WM_COMMAND, 10, 0);
 						}
@@ -774,6 +1013,38 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				}
 			}
 			//DrawState(hDC, NULL, NULL, (LPARAM)GetPropA(hwnd, "bitmap"), 0, 0, 0, 64, 64, DST_BITMAP);
+			break;
+		}
+	    case WM_NOTIFY: {
+			switch(((LPNMHDR)lParam) -> code) {
+				case LVN_ITEMACTIVATE: {
+					LPNMITEMACTIVATE lpnmia = (LPNMITEMACTIVATE)lParam;
+					switch(lpnmia -> hdr.idFrom) {
+						case 2: {
+							int id = lpnmia -> iItem;
+							LVITEMA lvi;
+							lvi.mask = LVIF_PARAM | LVIF_TEXT;
+							lvi.iItem = lpnmia -> iItem;
+							lvi.iSubItem = 0;
+							lvi.pszText = (char*)calloc(256, sizeof(char));
+							lvi.cchTextMax = 256;
+							ListView_GetItem(GetDlgItem(hWnd, 2), &lvi);
+							switch(lvi.lParam) {
+								case MT_FILE: {
+									EnableWindow(hWnd, FALSE);
+									HWND hFileWnd = CreateWindowExA(0, "NChat-File-View", "Chat File", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, hWnd, NULL, NULL, NULL);
+									SetPropA(hFileWnd, "FileName", lvi.pszText + 7);
+									SetPropA(hFileWnd, "hWndOwner", hWnd);
+									SendMessage(hFileWnd, WM_TIMER, 1, 0);
+									break;
+								}
+							}
+							break;
+						}
+					}
+					break;
+				}
+			}
 			break;
 		}
 		case WM_SETFOCUS: {
@@ -829,6 +1100,102 @@ LRESULT CALLBACK NotifyProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPara
 					break;
 				}
 			}
+			break;
+		}
+		default: return DefWindowProc(hWnd, Message, wParam, lParam);
+	}
+	return 0;
+}
+LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) {
+	switch(Message) {
+		case WM_CREATE: {
+			CreateWindowExA(0, "STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE, 0, 0, 0, 0, hWnd, (HMENU)1, NULL, NULL);
+			CreateWindowExA(0, "STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)2, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "&Download", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP | WS_GROUP, 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
+			CreateWindowExA(0, "BUTTON", "&Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)4, NULL, NULL);
+			SendDlgItemMessage(hWnd, 1, STM_SETIMAGE, IMAGE_ICON, (LPARAM)ExtractIcon(GetModuleHandle(NULL), "imageres.dll", 2));
+			break;
+		}
+		case WM_TIMER: {
+			switch(wParam) {
+				case 1: {
+					char *lpstrDetails = (char*)calloc(32767, sizeof(char));
+					sprintf(lpstrDetails, "File: %s", (char*)GetPropA(hWnd, "FileName"));
+					SetDlgItemText(hWnd, 2, lpstrDetails);
+					break;
+				}
+			}
+			break;
+		}
+		case WM_COMMAND: {
+			switch(LOWORD(wParam)) {
+				case 3: {
+					OPENFILENAMEA ofn;
+					memset(&ofn, 0, sizeof(ofn));
+					ofn.lStructSize = sizeof(ofn);
+					ofn.lpstrFile = (LPSTR)calloc(32767, sizeof(char));
+					ofn.nMaxFile = 32767;
+					ofn.lpstrFilter = "All Files(*.*)\0*.*\0\0";
+					ofn.hwndOwner = hWnd;
+					strcpy(ofn.lpstrFile, GetPropA(hWnd, "FileName"));
+					SetPropA(hWnd, "DownloadPath", ofn.lpstrFile);
+					if(GetSaveFileNameA(&ofn) == FALSE) {
+						free(ofn.lpstrFile);
+						break;
+					}
+					pthread_t ptid_t;
+					pthread_create(&ptid_t, NULL, DownloadingFileThread, (void*)hWnd);
+					Sleep(200);
+					free(ofn.lpstrFile);
+					DestroyWindow(hWnd);
+					break;
+				}
+				case 4: {
+					DestroyWindow(hWnd);
+					break;
+				}
+			}
+			break;
+		}
+		case WM_SIZE: {
+			RECT Rect;
+			GetClientRect(hWnd, &Rect);
+			SetWindowPos(GetDlgItem(hWnd, 1), NULL, Rect.right * 0.4, Rect.bottom * 0.1, Rect.right * 0.2, Rect.right * 0.2, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 2), NULL, Rect.right * 0.1, Rect.bottom * 0.1 + Rect.right * 0.2 + 20, Rect.right * 0.8, 20, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 3), NULL, Rect.right * 0.4 - 10, Rect.bottom * 0.1 + Rect.right * 0.2 + 60, Rect.right * 0.1, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 4), NULL, Rect.right * 0.5 + 10, Rect.bottom * 0.1 + Rect.right * 0.2 + 60, Rect.right * 0.1, 30, SWP_NOZORDER);
+			break;
+		}
+		case WM_CTLCOLORBTN: 
+		case WM_CTLCOLORSTATIC:
+		case WM_CTLCOLOREDIT:
+		case WM_CTLCOLORMSGBOX:
+		case WM_CTLCOLORDLG:
+		case WM_CTLCOLORLISTBOX:
+		case WM_CTLCOLORSCROLLBAR: {
+			if(UseDarkMode == 1) {
+				static HBRUSH hbrBkgnd = NULL;
+		        HDC hdcStatic = (HDC)wParam;
+		        SetTextColor(hdcStatic, RGB(255, 255, 255));
+		        SetBkColor(hdcStatic, RGB(25, 25, 25));
+		    	if(hbrBkgnd == NULL) {
+		            hbrBkgnd = CreateSolidBrush(RGB(25, 25, 25));
+		        }
+		        return (INT_PTR)hbrBkgnd;
+			}
+			else {
+				static HBRUSH hbrBkgnd = NULL;
+		        HDC hdcStatic = (HDC)wParam;
+		        SetBkColor(hdcStatic, RGB(255, 255, 255));
+		    	if(hbrBkgnd == NULL) {
+		            hbrBkgnd = CreateSolidBrush(RGB(255, 255, 255));
+		        }
+		        return (INT_PTR)hbrBkgnd;
+	    	}
+	        break;
+        }
+		case WM_DESTROY: {
+			EnableWindow(GetPropA(hWnd, "hWndOwner"), TRUE);
 			break;
 		}
 		default: return DefWindowProc(hWnd, Message, wParam, lParam);
@@ -924,6 +1291,12 @@ int main() {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;
 	}
+	wc.lpfnWndProc	 = FileViewProc;
+	wc.lpszClassName = "NChat-File-View";
+	if(RegisterClassEx(&wc) == FALSE) {
+		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
 	hWndMain = CreateWindowEx(0, "NChat-Client-Login", "Login the chat room",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION,
 		CW_USEDEFAULT, CW_USEDEFAULT, 1024, 512, NULL, NULL, NULL, NULL);
@@ -965,7 +1338,7 @@ int main() {
 	if(Msg.wParam == 0) return 0;
 	hWndMain = CreateWindowEx(0, "NChat-Client", "NChat",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION | WS_MAXIMIZEBOX | WS_THICKFRAME,
-		CW_USEDEFAULT, CW_USEDEFAULT, 1000, 512, NULL, NULL, NULL, NULL);
+		CW_USEDEFAULT, CW_USEDEFAULT, 1000, 550, NULL, NULL, NULL, NULL);
 	if(hWndMain == NULL) {
 		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;

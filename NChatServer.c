@@ -31,7 +31,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x1\x8";
+const char *VersionData = "\x1\x2\x0";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -355,7 +355,7 @@ void* SocketHandler(void* lParam) {
 			break;
 		}
 		else if(iResult > 0) {
-			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && ReceiveData[0] != '\x9' && beLogined == 0) {
+			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && ReceiveData[0] != '\x9' && ReceiveData[0] != '\xC' && ReceiveData[0] != '\x10' && beLogined == 0) {
 				send(ClientSocket, "\x4|ERR_LOGIN_FIRST", 17, 0);//The client has problem could do this
 			}
 			else switch(ReceiveData[0]) {
@@ -484,7 +484,70 @@ void* SocketHandler(void* lParam) {
 					break;
 				}
 				case 0xC: {//Send Message(File) 
-					
+					char UserName[512], FileName[512];
+					unsigned char NameLength = 0, FileNameLength = 0;
+					memset(UserName, 0, sizeof(UserName));
+					memset(FileName, 0, sizeof(FileName));
+					recv(ClientSocket, (char*)&NameLength, 1, 0);
+					recv(ClientSocket, UserName, NameLength, 0);
+					struct ULIST *This = UL_Head -> Next;
+					while(This != NULL) {
+						if(strcmp(This -> UserName, UserName) == 0) break;
+						This = This -> Next;
+					}
+					if(This == NULL) {
+						send(ClientSocket, "\x8|ERR_USER_DIDNOTLOGIN", 22, 0);
+					}
+					else {
+						send(ClientSocket, "\x0", 1, 0);
+#ifdef _WIN32
+						strcpy(FileName, "ChatFiles\\");
+#else
+						strcpy(FileName, "ChatFiles/");
+#endif
+						recv(ClientSocket, (char*)&FileNameLength, sizeof(FileNameLength), 0);
+						recv(ClientSocket, FileName + strlen(FileName), FileNameLength, 0);
+						FILE *lpFile = fopen(FileName, "rb");
+						if(lpFile != NULL) {
+							fclose(lpFile);
+							int FileNameLength = strlen(FileName), id;
+							while((lpFile = fopen(FileName, "rb")) != NULL) {
+								fclose(lpFile);
+								id += 1;
+								sprintf(FileName + FileNameLength, " (%d)", id);
+							}
+						}
+						lpFile = fopen(FileName, "wb");
+						if(lpFile == NULL) {
+							send(ClientSocket, "\x1", 1, 0);
+							closesocket(ClientSocket);
+							return NULL;
+						}
+						else send(ClientSocket, "\x0", 1, 0);
+						char *ReceiveData = (char*)calloc(32767, sizeof(char));
+						unsigned int FileSize = 0, BytesReadCount = 0, BytesRead;
+						recv(ClientSocket, (char*)&FileSize, sizeof(FileSize), 0);
+						while(BytesReadCount < FileSize) {
+							BytesReadCount += BytesRead = recv(ClientSocket, ReceiveData, 32767, 0);
+							fwrite(ReceiveData, sizeof(char), BytesRead, lpFile);
+						}
+						fclose(lpFile);
+						free(ReceiveData);
+						This = UL_Head -> Next;
+						FileNameLength = strlen(FileName + 10);
+						while(This != NULL) {
+							send(This -> UserBindClient, "\xE", 1, 0);
+							send(This -> UserBindClient, (const char*)&NameLength, sizeof(NameLength), 0);
+							send(This -> UserBindClient, UserName, NameLength, 0);
+							send(This -> UserBindClient, (const char*)&FileNameLength, sizeof(FileNameLength), 0);
+							send(This -> UserBindClient, FileName + 10, FileNameLength, 0);
+							send(This -> UserBindClient, (const char*)&FileSize, sizeof(FileSize), 0);
+							This = This -> Next;
+						}
+						LogOut("Server Thread/INFO", 0, "User %s sent a file named '%s'(Size: %.2lf Kib).", UserName, FileName + 10, FileSize * 1.0 / 1024.0);
+					}
+					closesocket(ClientSocket);
+					return NULL;
 					break;
 				}
 				case 0xD: {//List Users, no receiving anything
@@ -513,6 +576,52 @@ void* SocketHandler(void* lParam) {
 					closesocket(ClientSocket);
 					break;
 				}
+				case 0x10: {//Download File
+					char UserName[512], FileName[512];
+					unsigned char NameLength = 0, FileNameLength = 0;
+					memset(UserName, 0, sizeof(UserName));
+					memset(FileName, 0, sizeof(FileName));
+					recv(ClientSocket, (char*)&NameLength, sizeof(NameLength), 0);
+					recv(ClientSocket, UserName, NameLength, 0);
+					struct ULIST *This = UL_Head -> Next;
+					while(This != NULL) {
+						if(strcmp(This -> UserName, UserName) == 0) break;
+						This = This -> Next;
+					}
+					if(This == NULL) {
+						send(ClientSocket, "\x8|ERR_USER_DIDNOTLOGIN", 22, 0);
+					}
+					else {
+						send(ClientSocket, "\x0", 1, 0);
+#ifdef _WIN32
+						strcpy(FileName, "ChatFiles\\");
+#else
+						strcpy(FileName, "ChatFiles/");
+#endif
+						recv(ClientSocket, (char*)&FileNameLength, sizeof(FileNameLength), 0);
+						recv(ClientSocket, FileName + strlen(FileName), FileNameLength, 0);
+						FILE *lpFile = fopen(FileName, "rb");
+						if(lpFile == NULL) {
+							send(ClientSocket, "\x9|ERR_FILE_NOTFOUND", 19, 0);
+						}
+						else {
+							send(ClientSocket, "\x0", 1, 0);
+							char *ReadData = (char*)calloc(32767, sizeof(char));
+							fseek(lpFile, 0, SEEK_END);
+							unsigned int Size = ftell(lpFile), BytesRead = 0;
+							send(ClientSocket, (const char*)&Size, sizeof(Size), 0);
+							fseek(lpFile, 0, SEEK_SET);
+							LogOut("Server Thread/INFO", 0, "User %s is downloading file '%s'(Size: %.2lf Kib).", UserName, FileName + 10, Size * 1.0 / 1024);
+							while((BytesRead = fread(ReadData, sizeof(char), 32767, lpFile)) > 0) {
+								send(ClientSocket, ReadData, BytesRead, 0);
+							}
+							fclose(lpFile);
+						}
+					}
+					closesocket(ClientSocket);
+					return NULL;
+					break;
+				} 
 				case 'G': {//For webBrowser view
 					char RealPath[1145];
 					memset(RealPath, 0, sizeof(RealPath));
