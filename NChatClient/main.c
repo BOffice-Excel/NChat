@@ -5,11 +5,177 @@
 #include <pthread.h>
 #include <uxtheme.h>
 #include "..\Json.h"
+#include <exdisp.h>
+#include <exdispid.h>
 #include "NChatClient-GUI_private.h"
 #define key_press(key) (GetAsyncKeyState(key)&0x8000) //Define macro for detect keyboard
+/*typedef struct IOleObjectVtbl2 {
+    // IUnknown 方法
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
+        IOleObject* This,
+        REFIID riid,
+        void** ppvObject);
+ 
+    ULONG (STDMETHODCALLTYPE *AddRef)(
+        IOleObject* This);
+ 
+    ULONG (STDMETHODCALLTYPE *Release)(
+        IOleObject* This);
+ 
+    // IOleObject 特有方法
+    HRESULT (STDMETHODCALLTYPE *SetClientSite)(
+        IOleObject* This,
+        IOleClientSite* pClientSite);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetClientSite)(
+        IOleObject* This,
+        IOleClientSite** ppClientSite);
+ 
+    HRESULT (STDMETHODCALLTYPE *SetHostNames)(
+        IOleObject* This,
+        LPCOLESTR szContainerApp,
+        LPCOLESTR szContainerObj);
+ 
+    HRESULT (STDMETHODCALLTYPE *Close)(
+        IOleObject* This,
+        DWORD dwSaveOption);
+ 
+    HRESULT (STDMETHODCALLTYPE *SetMoniker)(
+        IOleObject* This,
+        DWORD dwWhichMoniker,
+        IMoniker* pmk);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetMoniker)(
+        IOleObject* This,
+        DWORD dwAssign,
+        DWORD dwWhichMoniker,
+        IMoniker** ppmk);
+ 
+    HRESULT (STDMETHODCALLTYPE *InitFromData)(
+        IOleObject* This,
+        IDataObject* pDataObject,
+        BOOL fCreation,
+        DWORD dwReserved);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetClipboardData)(
+        IOleObject* This,
+        DWORD dwReserved,
+        IDataObject** ppDataObject);
+ 
+    HRESULT (STDMETHODCALLTYPE *DoVerb)(
+        IOleObject* This,
+        LONG iVerb,
+        LPMSG lpmsg,
+        IOleClientSite* pActiveSite,
+        LONG lindex,
+        HWND hwndParent,
+        LPCRECT lprcPosRect);
+ 
+    HRESULT (STDMETHODCALLTYPE *EnumVerbs)(
+        IOleObject* This,
+        IEnumOLEVERB** ppEnumOleVerb);
+ 
+    HRESULT (STDMETHODCALLTYPE *Update)(
+        IOleObject* This);
+ 
+    HRESULT (STDMETHODCALLTYPE *IsUpToDate)(
+        IOleObject* This);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetUserClassID)(
+        IOleObject* This,
+        CLSID* pClsid);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetUserType)(
+        IOleObject* This,
+        DWORD dwFormOfType,
+        LPOLESTR* pszUserType);
+ 
+    HRESULT (STDMETHODCALLTYPE *SetExtent)(
+        IOleObject* This,
+        DWORD dwDrawAspect,
+        SIZEL* psizel);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetExtent)(
+        IOleObject* This,
+        DWORD dwDrawAspect,
+        SIZEL* psizel);
+ 
+    HRESULT (STDMETHODCALLTYPE *Advise)(
+        IOleObject* This,
+        IAdviseSink* pAdvSink,
+        DWORD* pdwConnection);
+ 
+    HRESULT (STDMETHODCALLTYPE *Unadvise)(
+        IOleObject* This,
+        DWORD dwConnection);
+ 
+    HRESULT (STDMETHODCALLTYPE *EnumAdvise)(
+        IOleObject* This,
+        IEnumSTATDATA** ppenumAdvise);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetMiscStatus)(
+        IOleObject* This,
+        DWORD dwAspect,
+        DWORD* pdwStatus);
+ 
+    HRESULT (STDMETHODCALLTYPE *SetColorScheme)(
+        IOleObject* This,
+        LOGPALETTE* pLogpal);
+ 
+} IOleObjectVtbl2;
+typedef struct IOleObject2 {
+    const IOleObjectVtbl* lpVtbl;
+} IOleObject2;
+#define IOleObject IOleObject2
+#define IOleObjectVtbl IOleObjectVtbl2
+typedef struct IOleClientSiteVtbl2 {
+    // IUnknown 方法
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
+        IOleClientSite* This,
+        REFIID riid,
+        void** ppvObject);
+ 
+    ULONG (STDMETHODCALLTYPE *AddRef)(
+        IOleClientSite* This);
+ 
+    ULONG (STDMETHODCALLTYPE *Release)(
+        IOleClientSite* This);
+ 
+    // IOleClientSite 特有方法
+    HRESULT (STDMETHODCALLTYPE *SaveObject)(
+        IOleClientSite* This);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetMoniker)(
+        IOleClientSite* This,
+        DWORD dwAssign,
+        DWORD dwWhichMoniker,
+        IMoniker** ppmk);
+ 
+    HRESULT (STDMETHODCALLTYPE *GetContainer)(
+        IOleClientSite* This,
+        IOleContainer** ppContainer);
+ 
+    HRESULT (STDMETHODCALLTYPE *ShowObject)(
+        IOleClientSite* This);
+ 
+    HRESULT (STDMETHODCALLTYPE *OnShowWindow)(
+        IOleClientSite* This,
+        BOOL fShow);
+ 
+    HRESULT (STDMETHODCALLTYPE *RequestNewObjectLayout)(
+        IOleClientSite* This);
+ 
+} IOleClientSiteVtbl2;
+ 
+typedef struct IOleClientSite2 {
+    const IOleClientSiteVtbl2* lpVtbl;
+} IOleClientSite2;
+#define IOleClientSiteVtbl IOleClientSiteVtbl2
+#define IOleClientSite IOleClientSite2*/
 enum MESSAGETYPE {
 	MT_PLAINTEXT = 0,
-	MT_FILE
+	MT_FILE,
+	MT_SYSTEMNOTIFICATION
 };
 typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     UINT  cbSize;
@@ -119,6 +285,7 @@ HBITMAP MakeBitmapWithName(const char *Name) {
 void* RecvMessageThread(void* lParam) {
 	memset(ReceiveData, 0, sizeof(ReceiveData));
 	while(recv(sockfd, ReceiveData, 1, 0) > 0) {
+		int LastLVCount = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 		switch(ReceiveData[0]) {
 			case '\x9': {
 				//Empty, testing is the server keeping alive
@@ -146,7 +313,9 @@ void* RecvMessageThread(void* lParam) {
 				}
 				LVITEMA lvi;
 				lvi.pszText = Str;
-				lvi.mask = LVIF_TEXT;
+				lvi.mask = LVIF_TEXT | LVIF_PARAM;
+				lvi.lParam = MT_SYSTEMNOTIFICATION;
+				lvi.iImage = -1;
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
@@ -176,7 +345,9 @@ void* RecvMessageThread(void* lParam) {
 				PeopleCount -= 1;
 				LVITEMA lvi;
 				lvi.pszText = Str;
-				lvi.mask = LVIF_TEXT;
+				lvi.mask = LVIF_TEXT | LVIF_PARAM;
+				lvi.lParam = MT_SYSTEMNOTIFICATION;
+				lvi.iImage = -1;
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
@@ -293,7 +464,7 @@ void* RecvMessageThread(void* lParam) {
 				free(lti.piColFmt);
 				break;
 			}
-			case '\xF': {
+			case '\xF': {//Message Notification
 				unsigned int iLen, iCount = 0;
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
@@ -324,6 +495,12 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				lvi.iImage = i;
+				char *ChatHistoryName = (char*)calloc(32767, sizeof(char));
+				sprintf(ChatHistoryName, "ChatMessages\\Message-%d.msg", ListView_GetItemCount(GetDlgItem(hWndMain, 2)));
+				FILE* lpMsgFile = fopen(ChatHistoryName, "wb");
+				fwrite(lvi.pszText, 1, strlen(lvi.pszText), lpMsgFile);
+				fclose(lpMsgFile);
+				free(ChatHistoryName);
 				printf("%s\n", lvi.pszText);
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText, 0);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
@@ -1030,6 +1207,60 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 							lvi.cchTextMax = 256;
 							ListView_GetItem(GetDlgItem(hWnd, 2), &lvi);
 							switch(lvi.lParam) {
+								case MT_PLAINTEXT: {
+									//EnableWindow(hWnd, FALSE);
+									//HWND hWndWeb = CreateWindowExA(0, "NChat-File-View", "NChat File Browser", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION | WS_MAXIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, hWnd, NULL, NULL, NULL); 
+									/*HMODULE hModule = LoadLibraryA("mshtml.dll");
+									if(hModule != NULL) {
+										FARPROC RunHTMLApplication = GetProcAddress(hModule, "RunHTMLApplication");
+										if(RunHTMLApplication != NULL) {
+											(HRESULT (*)(HINSTANCE,HINSTANCE,LPSTR,int))RunHTMLApplication(NULL, NULL, "https://boffice-excel.github.io/Website", SW_SHOW);
+										}
+										FreeLibrary(hModule);
+									}*//*
+									STARTUPINFOA si;memset(&si, 0, sizeof(si));
+									PROCESS_INFORMATION pi;memset(&pi, 0, sizeof(pi));
+									CreateProcessA(NULL, "mshta.exe .\MessageViewer.html", NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);*/
+									HWND hMsgWnd = CreateWindowExA(0, "NChat-Message-Viewer", "Message From User", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, NULL, NULL, NULL, NULL);
+									char *Details = (char*)calloc(1145141, sizeof(char));
+									sprintf(Details, "ChatMessages\\Message-%d.msg", lvi.iItem);
+									FILE *lpFile = fopen(Details, "r");
+									if(lpFile == NULL) {
+										MessageBox(hWnd, "The chat log file has been deleted!", "Error", MB_ICONWARNING);
+										return 0;
+									}
+									memset(Details, 0, 1145141);
+									fread(Details, 1145141, sizeof(char), lpFile);
+									fclose(lpFile);
+									int i;
+									for(i = 0; i < strlen(Details); i += 1) {
+										if(Details[i] == '>' && Details[i + 1] == ' ') {
+											i += 2;
+											break;
+										}
+									}
+									Details[i - 1] = '\0';
+									Details[i - 2] = '\0';
+									Details[0] = '\0';
+									SetPropA(hMsgWnd, "Message", Details + i);
+									SetPropA(hMsgWnd, "UserName", Details + 1);
+									int beSpecial = 1;
+									SetPropA(hMsgWnd, "ProfilePicture", MakeBitmapWithName("UnknownName"));
+									if(strcmp(Details + 1, "Server") == 0) SetPropA(hMsgWnd, "ProfilePicture", MakeBitmapWithName("SERVER"));
+									else for(i = 0; i < UsersCount + 2; i += 1) {
+										if(strcmp(Users[i].Name, Details + 1) == 0) {
+											SetPropA(hMsgWnd, "ProfilePicture", Users[i].hProfilePicture);
+											beSpecial = 0;
+											break;
+										}
+									}
+									SetPropA(hMsgWnd, "hWndOwner", hWnd);
+									SendMessage(hMsgWnd, WM_TIMER, 1, 0);
+									free(Details);
+									if(beSpecial == 0) DeleteObject(GetPropA(hMsgWnd, "ProfilePicture"));
+									//EnableWindow(hWnd, TRUE);
+									break;
+								}
 								case MT_FILE: {
 									EnableWindow(hWnd, FALSE);
 									HWND hFileWnd = CreateWindowExA(0, "NChat-File-View", "Chat File", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, hWnd, NULL, NULL, NULL);
@@ -1045,14 +1276,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 					break;
 				}
 			}
-			break;
-		}
-		case WM_SETFOCUS: {
-			InFocus = 1;
-			break;
-		}
-		case WM_KILLFOCUS: {
-			if(GetParent((HWND)wParam) != hWnd) InFocus = 0;
 			break;
 		}
 		case WM_CLOSE: {
@@ -1114,6 +1337,11 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 			CreateWindowExA(0, "BUTTON", "&Download", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON | WS_TABSTOP | WS_GROUP, 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "&Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)4, NULL, NULL);
 			SendDlgItemMessage(hWnd, 1, STM_SETIMAGE, IMAGE_ICON, (LPARAM)ExtractIcon(GetModuleHandle(NULL), "imageres.dll", 2));
+			int i;
+			for(i = 1; i <= 4; i++) {
+				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
+				SetWindowTheme(GetDlgItem(hWnd, i), (UseDarkMode == 0) ? L"Explorer" : L"DarkMode_Explorer", NULL);
+			}
 			break;
 		}
 		case WM_TIMER: {
@@ -1122,6 +1350,7 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					char *lpstrDetails = (char*)calloc(32767, sizeof(char));
 					sprintf(lpstrDetails, "File: %s", (char*)GetPropA(hWnd, "FileName"));
 					SetDlgItemText(hWnd, 2, lpstrDetails);
+					free(lpstrDetails);
 					break;
 				}
 			}
@@ -1202,6 +1431,135 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 	}
 	return 0;
 }
+LRESULT CALLBACK MessageViewerProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) {
+	switch(Message) {
+		case WM_CREATE: {
+			CreateWindowExA(0, "STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE, 0, 0, 0, 0, hWnd, (HMENU)1, NULL, NULL);
+			CreateWindowExA(0, "EDIT", NULL, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY, 0, 0, 0, 0, hWnd, (HMENU)2, NULL, NULL);
+			CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", NULL, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_VSCROLL | WS_HSCROLL | ES_READONLY, 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
+			int i;
+			for(i = 1; i <= 3; i++) {
+				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
+				SetWindowTheme(GetDlgItem(hWnd, i), (UseDarkMode == 0) ? L"Explorer" : L"DarkMode_Explorer", NULL);
+			}
+			break;
+		}
+		case WM_TIMER: {
+			switch(wParam) {
+				case 1: {
+					SendDlgItemMessage(hWnd, 1, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)GetPropA(hWnd, "ProfilePicture"));
+					SetDlgItemText(hWnd, 2, (char*)GetPropA(hWnd, "UserName"));
+					SetDlgItemText(hWnd, 3, (char*)GetPropA(hWnd, "Message"));
+					break;
+				}
+			}
+			break;
+		}
+		case WM_SIZE: {
+			RECT Rect;
+			GetClientRect(hWnd, &Rect);
+			SetWindowPos(GetDlgItem(hWnd, 1), NULL, Rect.right * 0.1, Rect.bottom * 0.1, 64, 64, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 2), NULL, Rect.right * 0.1 + 84, Rect.bottom * 0.1 + 17, Rect.right * 0.8 - 84, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 3), NULL, Rect.right * 0.1, Rect.bottom * 0.1 + 84, Rect.right * 0.8, Rect.bottom * 0.9 - 104, SWP_NOZORDER);
+			break;
+		}
+		case WM_CTLCOLORBTN: 
+		case WM_CTLCOLORSTATIC:
+		case WM_CTLCOLOREDIT:
+		case WM_CTLCOLORMSGBOX:
+		case WM_CTLCOLORDLG:
+		case WM_CTLCOLORLISTBOX:
+		case WM_CTLCOLORSCROLLBAR: {
+			if(UseDarkMode == 1) {
+				static HBRUSH hbrBkgnd = NULL;
+		        HDC hdcStatic = (HDC)wParam;
+		        SetTextColor(hdcStatic, RGB(255, 255, 255));
+		        SetBkColor(hdcStatic, RGB(25, 25, 25));
+		    	if(hbrBkgnd == NULL) {
+		            hbrBkgnd = CreateSolidBrush(RGB(25, 25, 25));
+		        }
+		        return (INT_PTR)hbrBkgnd;
+			}
+			else {
+				static HBRUSH hbrBkgnd = NULL;
+		        HDC hdcStatic = (HDC)wParam;
+		        SetBkColor(hdcStatic, RGB(255, 255, 255));
+		    	if(hbrBkgnd == NULL) {
+		            hbrBkgnd = CreateSolidBrush(RGB(255, 255, 255));
+		        }
+		        return (INT_PTR)hbrBkgnd;
+	    	}
+	        break;
+        }
+		case WM_DESTROY: {
+			EnableWindow(GetPropA(hWnd, "hWndOwner"), TRUE);
+			break;
+		}
+		default: return DefWindowProc(hWnd, Message, wParam, lParam);
+	}
+	return 0;
+}
+/*LRESULT CALLBACK FileBrowserProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) {
+	switch(Message) {
+		case WM_CREATE: {
+			HWND hWndBrowser = CreateWindowExA(0, "STATIC", "", WS_CHILD | WS_VISIBLE | WS_BORDER, 0, 0, 845, 480, hWnd, (HMENU)20, GetModuleHandle(0), NULL);
+			IWebBrowser2 *pBrowser;
+			CoInitialize(NULL);
+//const struct IID CLSID_WebBrowser2 = ;
+#define DEFINE_GUID2(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
+const GUID name = { l, w1, w2, { b1, b2, b3, b4, b5, b6, b7, b8 } }
+DEFINE_GUID2(CLSID_WebBrowser__, // {8856F961-340A-11D0-A96B-00C04FD705A2}
+0x8856F961, 0x340A, 0x11D0, 
+0xA9, 0x6B, 0x00, 0xC0, 0x4F, 0xD7, 0x05, 0xA2);
+DEFINE_GUID2(IID_IWebBrowser2__, // {D30C1661-CDAF-11D0-8A3E-00C04FC9E26E}
+0xD30C1661, 0xCDAF, 0x11D0, 
+0x8A, 0x3E, 0x00, 0xC0, 0x4F, 0xC9, 0xE2, 0x6E);
+DEFINE_GUID2(IID_IOleObject__, 
+0x00000112, 0x0000, 0x0000, 
+0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
+			CoCreateInstance(&CLSID_WebBrowser__, NULL, CLSCTX_ALL, &IID_IWebBrowser2__, (void**)&pBrowser);
+			IWebBrowser2Vtbl *pBrowserVtbl = pBrowser -> lpVtbl;
+			IOleObject2* pOleObj;
+			pBrowserVtbl -> QueryInterface(pBrowser, &IID_IOleObject__, (void**)&pOleObj);
+			printf("ok");
+			IOleClientSite* pClientSite = NULL;
+			CreateOleClientSite(hWndBrowser, &pClientSite);
+			pOleObj -> lpVtbl -> SetClientSite((IOleObject*)pOleObj, (IOleClientSite*)pClientSite);
+			printf("ok");
+			RECT rc;
+			GetClientRect(hWndBrowser, &rc);
+			printf("ok");
+			pOleObj -> lpVtbl -> DoVerb(pOleObj,
+			    OLEIVERB_SHOW,
+			    NULL,
+			    pClientSite,
+			    0,
+			    hWnd,
+			    &rc
+			);
+			printf("ok");
+			pOleObj -> lpVtbl -> Release((IOleObject*)pOleObj);
+			printf("ok");
+			//NavigateFunc Navigate = (NavigateFunc)((void**)(*(void***)pBrowser))[3];
+			pBrowserVtbl -> Navigate(pBrowser,
+			    L"http://example.com",
+			    NULL,
+			    NULL,
+			    NULL,
+			    NULL
+			);
+			//((IUnknown*)pBrowser)->lpVtbl -> Release(pBrowser);
+			//pBrowserVtbl -> Release(pBrowser);
+			break;
+		}
+		case WM_DESTROY: {
+			PostQuitMessage(0);
+			break;
+		}
+		default: return DefWindowProc(hWnd, Message, wParam, lParam);
+	}
+	return 0;
+}*/
 int main() {
 	INITCOMMONCONTROLSEX icex;
 	icex.dwSize = sizeof(icex);
@@ -1297,6 +1655,32 @@ int main() {
 		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
 		return -1;
 	}
+	wc.lpfnWndProc	 = MessageViewerProc;
+	wc.lpszClassName = "NChat-Message-Viewer";
+	if(RegisterClassEx(&wc) == FALSE) {
+		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
+	/*wc.lpfnWndProc	 = FileBrowserProc;
+	wc.lpszClassName = "NChat-File-Browser";
+	if(RegisterClassEx(&wc) == FALSE) {
+		MessageBox(NULL, "Window Registration Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
+	hWndMain = CreateWindowEx(0, "NChat-File-Browser", "Login the chat room",
+		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION,
+		CW_USEDEFAULT, CW_USEDEFAULT, 1024, 512, NULL, NULL, NULL, NULL);
+	if(hWndMain == NULL) {
+		MessageBox(NULL, "Window Creation Failed!", "Error!", MB_ICONEXCLAMATION | MB_OK);
+		return -1;
+	}
+	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
+		if(IsDialogMessage(hWndMain, &Msg) == FALSE) {
+			TranslateMessage(&Msg);
+			DispatchMessage(&Msg);
+		}
+	}
+	return 0;*/
 	hWndMain = CreateWindowEx(0, "NChat-Client-Login", "Login the chat room",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION,
 		CW_USEDEFAULT, CW_USEDEFAULT, 1024, 512, NULL, NULL, NULL, NULL);
@@ -1361,6 +1745,8 @@ int main() {
 	pthread_t MessageHandler_t;
 	pthread_create(&MessageHandler_t, NULL, RecvMessageThread, NULL);
 	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
+		if(Msg.message == WM_KILLFOCUS && (GetParent(Msg.hwnd) == hWndMain || Msg.hwnd == hWndMain)) InFocus = 0;
+		if(Msg.message == WM_SETFOCUS) InFocus = 1;
 		if(IsDialogMessage(hWndMain, &Msg) == FALSE) {
 			TranslateMessage(&Msg);
 			DispatchMessage(&Msg);

@@ -1,4 +1,5 @@
 #include <pthread.h>
+//#include <dlfcn.h>
 #ifdef _WIN32
 #include <WinSock2.h>
 #include <ws2tcpip.h>
@@ -31,7 +32,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x0";
+const char *VersionData = "\x1\x2\x1";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
