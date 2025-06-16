@@ -32,13 +32,14 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x1";
+const char *VersionData = "\x1\x2\x2";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
 	struct ULIST *Next, *Last;
 }*UL_Head, *UL_Last;
 unsigned int UsersCount = 0, UserLimit;
+unsigned long long MessagesCount = 0;
 SOCKET ListenSocket;
 pthread_mutex_t thread_lock;
 int send_lock(SOCKET s, const char *buf, int len, int flags) {
@@ -323,7 +324,41 @@ void* InputThread(void* lParam) {
 				send(This -> UserBindClient, lpstrInput + 4, iLength, 0);
 				This = This -> Next;
 			}
-			LogOut("Server Thread/INFO", 0, "<Server> %s", lpstrInput + 4);
+			char FileName[32767];
+#ifdef _WIN32
+			sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
+#else
+			sprintf(FileName, "ChatMessages/Message-%lld.nmsg", MessagesCount);
+#endif
+			FILE *lpFile = fopen(FileName, "w");
+			if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
+			else {
+				fprintf(lpFile, "<Server> %s", lpstrInput + 4);
+				fclose(lpFile);
+			}
+			LogOut("Server Thread/INFO", 0, "[Message-%lld] <Server> %s", MessagesCount, lpstrInput + 4);
+			MessagesCount += 1;
+		}
+		else if(strcmp(lpstrCommand, "viewmsg") == 0) {
+			if(lpstrInput[7] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command viewmsg!");
+				continue;
+			}
+			char FileName[32767];
+#ifdef _WIN32
+			sprintf(FileName, "ChatMessages\\Message-%s.nmsg", lpstrInput + 8);
+#else
+			sprintf(FileName, "ChatMessages/Message-%s.nmsg", lpstrInput + 8);
+#endif
+			FILE *lpFile = fopen(FileName, "r");
+			if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "The message record file has been deleted!");
+			else {
+				char *Data = (char*)calloc(114514, sizeof(char));
+				fread(Data, sizeof(char), 114514, lpFile);
+				LogOut("Server Thread/INFO", 0, "[Message Recorder] %s", Data);
+				fclose(lpFile);
+				free(Data);
+			}
 		}
 		else if(strcmp(lpstrCommand, "help") == 0) {
 			LogOut("Server Thread/INFO", 0, "Commands: \n\
@@ -335,6 +370,8 @@ void* InputThread(void* lParam) {
   list -> List the users, Method: list\n\
   kick -> Kick user out of the room, Method: kick <User Name: String>\n\
   roomname -> Set or query the chat room name, Method: roomname [New Room Name: String]\n\
+  say -> Say something..., Method: say <Something you want to say: String>\n\
+  viewmsg -> View the message details in the past, Method: viewmsg <Message Id: Int>\n\
   whitelist -> Manage the whitelist, Method: whitelist <add, disable, enable, help, list, remove> [User Name(Only add or remove option): String]");
 		}
 		else {
@@ -467,21 +504,44 @@ void* SocketHandler(void* lParam) {
 						send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
 						This = This -> Next;
 					}
-					printf("<%s> ", UL_New -> UserName);//Who sent the message
+					char FileName[32767];
+#ifdef _WIN32
+					sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
+#else
+					sprintf(FileName, "ChatMessages/Message-%lld.nmsg", MessagesCount);
+#endif
+					FILE *lpFile = fopen(FileName, "w");
+					if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
+					else fprintf(lpFile, "<%s> ", UL_New -> UserName);
+					LogOut("Server Thread/INFO", 1, "[Message-%lld] <%s> ", MessagesCount, UL_New -> UserName);//Who sent the message
 					while(iCount < iLen) {
 						memset(ReceiveData, 0, sizeof(ReceiveData));
 						iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
 						if(iResult <= 0) break;
 						iCount += iResult;
-						printf("%s", ReceiveData);//Print Message
+						if(lpFile != NULL) fprintf(lpFile, "%s", ReceiveData);
 						This = UL_Head -> Next;
 						while(This != NULL) {
 							send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
 							This = This -> Next;
 						}
+						if(iCount <= iResult) {
+							int i, Disabled = 0;
+							for(i = 0; i < 30; i += 1) {
+								if(ReceiveData[i] == '\n' || ReceiveData[i] == '\r') {
+									strcpy(ReceiveData + i, "...(More)");
+									Disabled = 1;
+									break;
+								}
+							}
+							if(Disabled == 0) ReceiveData[30] = '\0';
+							printf("%s", ReceiveData);//Print Message
+						}
 						//if(iResult < sizeof(ReceiveData) - 1) break;
 					}
+					if(lpFile != NULL) fclose(lpFile);
 					printf("\n");
+					MessagesCount += 1;
 					break;
 				}
 				case 0xC: {//Send Message(File) 
@@ -825,6 +885,9 @@ int main() {
     pthread_mutex_init(&thread_lock, NULL);
     pthread_t ThreadId;
     pthread_create(&ThreadId, NULL, InputThread, NULL);
+	system("mkdir Configs");
+	system("mkdir ChatFiles");
+	system("mkdir ChatMessages");
 	while(1) {
 		ClientSocket = accept(ListenSocket, NULL, NULL);
 	    if(ClientSocket == INVALID_SOCKET) {

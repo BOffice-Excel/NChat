@@ -498,7 +498,19 @@ void* RecvMessageThread(void* lParam) {
 				char *ChatHistoryName = (char*)calloc(32767, sizeof(char));
 				sprintf(ChatHistoryName, "ChatMessages\\Message-%d.msg", ListView_GetItemCount(GetDlgItem(hWndMain, 2)));
 				FILE* lpMsgFile = fopen(ChatHistoryName, "wb");
-				fwrite(lvi.pszText, 1, strlen(lvi.pszText), lpMsgFile);
+				for(i = 0; i < strlen(lvi.pszText); i += 1) {
+					if(lvi.pszText[i] == '\n') {
+						fwrite("\r\n", 1, 2, lpMsgFile);
+					}
+					else {
+						char *iRes = strchr(lvi.pszText + i, '\n');
+						int idx;
+						if(iRes == NULL) idx = strlen(lvi.pszText);
+						else idx = iRes - lvi.pszText - i;
+						fwrite(lvi.pszText + i, sizeof(char), idx, lpMsgFile);
+						i += idx - 1;
+					}
+				}
 				fclose(lpMsgFile);
 				free(ChatHistoryName);
 				printf("%s\n", lvi.pszText);
@@ -989,6 +1001,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_GROUP | WS_VISIBLE | LVS_SINGLESEL, 0, 0, 0, 0, hWnd, (HMENU)2, NULL, NULL);
 			CreateWindowExA((UseDarkMode == 0) * WS_EX_CLIENTEDGE, "EDIT", "",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_HSCROLL | WS_VSCROLL | ES_MULTILINE | (UseDarkMode * WS_BORDER), 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
+			//SendDlgItemMessage(hWnd, 3, EM_SETCUEBANNER, TRUE, (LPARAM)L"Ctrl + Enter Line Break");
 			CreateWindowExA(0, "STATIC", "User Name: ",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)4, NULL, NULL);
 			CreateWindowExA(0, "STATIC", "Server Name: ",
@@ -1221,10 +1234,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 									STARTUPINFOA si;memset(&si, 0, sizeof(si));
 									PROCESS_INFORMATION pi;memset(&pi, 0, sizeof(pi));
 									CreateProcessA(NULL, "mshta.exe .\MessageViewer.html", NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);*/
-									HWND hMsgWnd = CreateWindowExA(0, "NChat-Message-Viewer", "Message From User", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, NULL, NULL, NULL, NULL);
 									char *Details = (char*)calloc(1145141, sizeof(char));
 									sprintf(Details, "ChatMessages\\Message-%d.msg", lvi.iItem);
-									FILE *lpFile = fopen(Details, "r");
+									FILE *lpFile = fopen(Details, "rb");
 									if(lpFile == NULL) {
 										MessageBox(hWnd, "The chat log file has been deleted!", "Error", MB_ICONWARNING);
 										return 0;
@@ -1242,22 +1254,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 									Details[i - 1] = '\0';
 									Details[i - 2] = '\0';
 									Details[0] = '\0';
+									HWND hMsgWnd = CreateWindowExA(0, "NChat-Message-Viewer", "Message From User", WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION, CW_USEDEFAULT, CW_USEDEFAULT, 845, 480, NULL, NULL, NULL, NULL);
 									SetPropA(hMsgWnd, "Message", Details + i);
 									SetPropA(hMsgWnd, "UserName", Details + 1);
-									int beSpecial = 1;
-									SetPropA(hMsgWnd, "ProfilePicture", MakeBitmapWithName("UnknownName"));
 									if(strcmp(Details + 1, "Server") == 0) SetPropA(hMsgWnd, "ProfilePicture", MakeBitmapWithName("SERVER"));
-									else for(i = 0; i < UsersCount + 2; i += 1) {
-										if(strcmp(Users[i].Name, Details + 1) == 0) {
-											SetPropA(hMsgWnd, "ProfilePicture", Users[i].hProfilePicture);
-											beSpecial = 0;
-											break;
-										}
-									}
+									else SetPropA(hMsgWnd, "ProfilePicture", MakeBitmapWithName(Details + 1));
 									SetPropA(hMsgWnd, "hWndOwner", hWnd);
 									SendMessage(hMsgWnd, WM_TIMER, 1, 0);
 									free(Details);
-									if(beSpecial == 0) DeleteObject(GetPropA(hMsgWnd, "ProfilePicture"));
+									DeleteObject(GetPropA(hMsgWnd, "ProfilePicture"));
 									//EnableWindow(hWnd, TRUE);
 									break;
 								}
@@ -1436,7 +1441,7 @@ LRESULT CALLBACK MessageViewerProc(HWND hWnd, UINT Message, WPARAM wParam, LPARA
 		case WM_CREATE: {
 			CreateWindowExA(0, "STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE, 0, 0, 0, 0, hWnd, (HMENU)1, NULL, NULL);
 			CreateWindowExA(0, "EDIT", NULL, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY, 0, 0, 0, 0, hWnd, (HMENU)2, NULL, NULL);
-			CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", NULL, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_VSCROLL | WS_HSCROLL | ES_READONLY, 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
+			CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", NULL, WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_AUTOVSCROLL | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_READONLY, 0, 0, 0, 0, hWnd, (HMENU)3, NULL, NULL);
 			int i;
 			for(i = 1; i <= 3; i++) {
 				SendDlgItemMessage(hWnd, i, WM_SETFONT, (WPARAM)hFont, 0);
@@ -1720,6 +1725,7 @@ int main() {
 		CloseHandle(hFile);
 	}
 	if(Msg.wParam == 0) return 0;
+	CreateDirectory("ChatMessages", NULL);
 	hWndMain = CreateWindowEx(0, "NChat-Client", "NChat",
 		WS_VISIBLE | WS_MINIMIZEBOX | WS_SYSMENU | WS_CAPTION | WS_MAXIMIZEBOX | WS_THICKFRAME,
 		CW_USEDEFAULT, CW_USEDEFAULT, 1000, 550, NULL, NULL, NULL, NULL);
