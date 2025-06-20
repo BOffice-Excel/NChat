@@ -203,6 +203,7 @@ struct CHATROOM {
 	char Name[512], InvitationCode[256], IP[256], Port[8];
 }ChatRooms[128];
 HFONT hFont, hIconFont;
+HHOOK hFocus;
 SOCKET sockfd;
 BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL bAlwaysShow) {
 	if(bAlwaysShow == 0 && InFocus == 1) return TRUE;
@@ -234,6 +235,16 @@ BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL
 		}
 	}
 	return Shell_NotifyIconA(NIM_MODIFY, &nid2);
+}
+LRESULT CALLBACK FocusProc(int nCode, WPARAM wParam, LPARAM lParam) {
+	if(nCode == HC_ACTION) {
+		LPCWPSTRUCT lpcs = (LPCWPSTRUCT)lParam;
+		if(lpcs -> message == WM_KILLFOCUS && (GetParent(lpcs -> hwnd) == hWndMain || lpcs -> hwnd == hWndMain)) InFocus = 0;
+		if(lpcs -> message == WM_SETFOCUS) InFocus = 1;
+		if(lpcs -> message == WM_KILLFOCUS && (GetParent(lpcs -> hwnd) == hWndMain || lpcs -> hwnd == hWndMain)) printf("Msg: WM_KILLFOCUS, MainWindow = %p, Window = %p, Parent = %p\n", hWndMain, lpcs -> hwnd, GetParent(lpcs -> hwnd));
+		if(lpcs -> message == WM_SETFOCUS) printf("Msg: WM_SETFOCUS, MainWindow = %p, Window = %p, Parent = %p\n", hWndMain, lpcs -> hwnd, GetParent(lpcs -> hwnd));
+	}
+	return CallNextHookEx(hFocus, nCode, wParam, lParam);
 }
 void RecvFull(SOCKET sockfd, char *Buffer, int size) {
 	int iEnum = 0, DataCount = recv(sockfd, Buffer + iEnum, size, 0);
@@ -484,7 +495,7 @@ void* RecvMessageThread(void* lParam) {
 				idx = strlen(lvi.pszText);
 				while(1) {
 					memset(ReceiveData, 0, sizeof(ReceiveData));
-					iReceived = recv(sockfd, ReceiveData, sizeof(ReceiveData), 0);
+					iReceived = recv(sockfd, ReceiveData, (iLen - iCount > sizeof(ReceiveData)) ? sizeof(ReceiveData) : (iLen - iCount), 0);
 					memcpy(lvi.pszText + idx, ReceiveData, iReceived);
 					idx += iReceived;
 					iCount += iReceived;
@@ -505,7 +516,7 @@ void* RecvMessageThread(void* lParam) {
 					else {
 						char *iRes = strchr(lvi.pszText + i, '\n');
 						int idx;
-						if(iRes == NULL) idx = strlen(lvi.pszText);
+						if(iRes == NULL) idx = strlen(lvi.pszText + i);
 						else idx = iRes - lvi.pszText - i;
 						fwrite(lvi.pszText + i, sizeof(char), idx, lpMsgFile);
 						i += idx - 1;
@@ -513,8 +524,9 @@ void* RecvMessageThread(void* lParam) {
 				}
 				fclose(lpMsgFile);
 				free(ChatHistoryName);
-				printf("%s\n", lvi.pszText);
+				//printf("%s\n", lvi.pszText);
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText, 0);
+				if(InFocus == FALSE) FlashWindow(hWndMain, FALSE);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
 				free(lvi.pszText);
 				break;
@@ -744,9 +756,10 @@ BOOL Signin(const char *IP, const char *Port, const char *Name, const char *Invi
     send(sockfd, (char*)&iLen, 1, 0);
     send(sockfd, Name, iLen, 0);
     memset(ReceiveData, 0, sizeof(ReceiveData));
-    recv(sockfd, ReceiveData, sizeof(ReceiveData), 0);
+    recv(sockfd, ReceiveData, 1, 0);
     //RecvFull(sockfd, ReceiveData, sizeof(ReceiveData));
     if(ReceiveData[0] != '\x1') {
+    	recv(sockfd, ReceiveData + 1, sizeof(ReceiveData) - 1, 0);
     	printf("Cannot connect to server: %s(%d)\n", ReceiveData + 2, ReceiveData[0]);
     	closesocket(sockfd);
     	sockfd = 0;
@@ -1062,7 +1075,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)12, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
 			CheckDlgButton(hWnd, 10, BST_CHECKED);
-			CheckDlgButton(hWnd, 11, BST_CHECKED);
+			//CheckDlgButton(hWnd, 11, BST_CHECKED);
 			ListView_SetView(GetDlgItem(hWnd, 2), LV_VIEW_TILE);
 			LVCOLUMN lc;
 			lc.mask = 0;
@@ -1750,16 +1763,20 @@ int main() {
 	Shell_NotifyIconA(NIM_SETVERSION, &nid);
 	pthread_t MessageHandler_t;
 	pthread_create(&MessageHandler_t, NULL, RecvMessageThread, NULL);
+	//hFocus = SetWindowsHookExA(WH_CALLWNDPROC, FocusProc, GetModuleHandleA(NULL), 0);
 	while(GetMessage(&Msg, NULL, 0, 0) > 0) {
-		if(Msg.message == WM_KILLFOCUS && (GetParent(Msg.hwnd) == hWndMain || Msg.hwnd == hWndMain)) InFocus = 0;
-		if(Msg.message == WM_SETFOCUS) InFocus = 1;
 		if(IsDialogMessage(hWndMain, &Msg) == FALSE) {
 			TranslateMessage(&Msg);
 			DispatchMessage(&Msg);
 		}
-	}
+		/*if(Msg.message == WM_KILLFOCUS && (GetParent(Msg.hwnd) == hWndMain || Msg.hwnd == hWndMain)) InFocus = 0;
+		if(Msg.message == WM_SETFOCUS) InFocus = 1;
+		if(Msg.message == WM_KILLFOCUS && (GetParent(Msg.hwnd) == hWndMain || Msg.hwnd == hWndMain)) printf("Msg: WM_KILLFOCUS, MainWindow = %p, Window = %p, Parent = %p", hWndMain, Msg.hwnd, GetParent(Msg.hwnd));
+		if(Msg.message == WM_SETFOCUS) printf("Msg: WM_SETFOCUS, MainWindow = %p, Window = %p, Parent = %p", hWndMain, Msg.hwnd, GetParent(Msg.hwnd));
+	*/}
 	closesocket(sockfd);
 	WSACleanup();
+	//UnhookWindowsHookEx(hFocus);
 	Shell_NotifyIconA(NIM_DELETE, &nid);
 	return Msg.wParam;
 }
