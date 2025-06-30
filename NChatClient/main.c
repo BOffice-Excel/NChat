@@ -2,6 +2,7 @@
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
+#include <time.h>
 #include <pthread.h>
 #include <uxtheme.h>
 #include "..\Json.h"
@@ -205,6 +206,18 @@ struct CHATROOM {
 HFONT hFont, hIconFont;
 HHOOK hFocus;
 SOCKET sockfd;
+FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict__ _Mode) {
+	FILE* lpFile = fopen(_Filename, _Mode);
+	printf("Opened File: %p\n", lpFile);
+	return lpFile;
+}
+int __cdecl fclose2(FILE *_File) {
+	int iResult = fclose(_File);
+	printf("Closed File: %p\n", _File);
+	return iResult;
+}
+#define fopen fopen2
+#define fclose fclose2
 BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL bAlwaysShow) {
 	if(bAlwaysShow == 0 && InFocus == 1) return TRUE;
 	NOTIFYICONDATAA nid2;
@@ -304,6 +317,8 @@ void* RecvMessageThread(void* lParam) {
 			}
 			case '\xA': {
 				char Str[114514];
+				time_t Time;
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
 				sprintf(Str, "%s joined the chat room", ReceiveData);
@@ -330,11 +345,28 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				struct tm* TimeStruct = localtime(&Time);
+				int iStart = strlen(lvi.pszText) + 1;
+				strftime(lvi.pszText + iStart, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText + iStart);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
 		    	lvi.pszText = Str;
 		    	lvi.mask = LVIF_TEXT;
 		    	int k;
 				lvi.cchTextMax = 114514;
-				ShowToastMessage(NIIF_NONE, "Message", Str, 0);
+				Str[iStart - 1] = '\n';
+				ShowToastMessage(NIIF_NONE, "Message", Str, 1);
 				for(k = 0; k < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); k++) {
 					lvi.iItem = k;
 					ListView_GetItem(GetDlgItem(hWndMain, 8), &lvi);
@@ -350,6 +382,8 @@ void* RecvMessageThread(void* lParam) {
 			}
 			case '\xB': {
 				char Str[114514];
+				time_t Time;
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
 				sprintf(Str, "%s left the chat room", ReceiveData);
@@ -362,7 +396,28 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
-				ShowToastMessage(NIIF_NONE, "Message", Str, 0);
+				struct tm* TimeStruct = localtime(&Time);
+				int iStart = strlen(lvi.pszText) + 1;
+				strftime(lvi.pszText + iStart, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText + iStart);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
+		    	lvi.pszText = Str;
+		    	lvi.mask = LVIF_TEXT;
+		    	int k;
+				lvi.cchTextMax = 114514;
+				Str[iStart - 1] = '\n';
+				ShowToastMessage(NIIF_NONE, "Message", Str, 1);
 				int i;
 				lvi.cchTextMax = 114514;
 				for(i = 0; i < ListView_GetItemCount(GetDlgItem(hWndMain, 8)); i++) {
@@ -429,6 +484,8 @@ void* RecvMessageThread(void* lParam) {
 				memset(FileName, 0, sizeof(FileName));
 				unsigned int FileSize;
 				unsigned char UserNameLength, FileNameLength;
+				time_t Time;
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
 				recv(sockfd, (char*)&UserNameLength, sizeof(UserNameLength), 0);
 				recv(sockfd, UserName, UserNameLength, 0);
 				recv(sockfd, (char*)&FileNameLength, sizeof(FileNameLength), 0);
@@ -452,7 +509,10 @@ void* RecvMessageThread(void* lParam) {
 				lvi.pszText = (char*)calloc(512, sizeof(char));
 				sprintf(lvi.pszText, "[File] %s", FileName);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
-				sprintf(lvi.pszText, "%s sent a file", UserName);
+				struct tm* TimeStruct = localtime(&Time);
+				sprintf(lvi.pszText, "%s sent a file (", UserName);
+				strftime(lvi.pszText + strlen(lvi.pszText), 1145, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				lvi.pszText[strlen(lvi.pszText)] = ')';
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New file", lvi.pszText, 0);
 				lvi.iSubItem = 1;
 				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
@@ -477,6 +537,8 @@ void* RecvMessageThread(void* lParam) {
 			}
 			case '\xF': {//Message Notification
 				unsigned int iLen, iCount = 0;
+				time_t Time;
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
 				recv(sockfd, ReceiveData, 1, 0);
 				recv(sockfd, ReceiveData, ReceiveData[0], 0);
 				recv(sockfd, (char*)&iLen, sizeof(iLen), 0);
@@ -508,6 +570,7 @@ void* RecvMessageThread(void* lParam) {
 				lvi.iImage = i;
 				char *ChatHistoryName = (char*)calloc(32767, sizeof(char));
 				sprintf(ChatHistoryName, "ChatMessages\\Message-%d.msg", ListView_GetItemCount(GetDlgItem(hWndMain, 2)));
+				printf("New Message: %s\n", ChatHistoryName);
 				FILE* lpMsgFile = fopen(ChatHistoryName, "wb");
 				for(i = 0; i < strlen(lvi.pszText); i += 1) {
 					if(lvi.pszText[i] == '\n') {
@@ -528,6 +591,21 @@ void* RecvMessageThread(void* lParam) {
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText, 0);
 				if(InFocus == FALSE) FlashWindow(hWndMain, FALSE);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				struct tm* TimeStruct = localtime(&Time);
+				strftime(lvi.pszText, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
 				free(lvi.pszText);
 				break;
 			}
@@ -1249,6 +1327,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 									CreateProcessA(NULL, "mshta.exe .\MessageViewer.html", NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);*/
 									char *Details = (char*)calloc(1145141, sizeof(char));
 									sprintf(Details, "ChatMessages\\Message-%d.msg", lvi.iItem);
+									printf("%s\n",Details); 
 									FILE *lpFile = fopen(Details, "rb");
 									if(lpFile == NULL) {
 										MessageBox(hWnd, "The chat log file has been deleted!", "Error", MB_ICONWARNING);
