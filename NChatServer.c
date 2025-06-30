@@ -32,7 +32,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x3";
+const char *VersionData = "\x1\x2\x4";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -56,7 +56,7 @@ void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
 	time(&CurrentTime);
 	struct tm* localTime;
     localTime = localtime(&CurrentTime);
-    strftime(LogBuf, sizeof(LogBuf), "%H:%M:%S", localTime);
+    strftime(LogBuf, sizeof(LogBuf), "%Y-%m-%d %H:%M:%S", localTime);
     vsprintf(LogBuf2, Format, v);
     printf("[%s] [%s]: %s", LogBuf, Poster, LogBuf2);
     if(NoNewLine == 0) printf("\n");
@@ -93,7 +93,7 @@ void* InputThread(void* lParam) {
 			return NULL;
 		}
 		else if(strcmp(lpstrCommand, "list") == 0) {
-			LogOut("Server Thread/INFO", 1, "There are %d of a max of %d players online: ", UsersCount, UserLimit);
+			LogOut("Server Thread/INFO", 1, "There are %d of a max of %d users online: ", UsersCount, UserLimit);
 			struct ULIST* This = UL_Head -> Next;
 			while(This != NULL) {
 				printf("%s", This -> UserName);
@@ -118,7 +118,7 @@ void* InputThread(void* lParam) {
 				send(This -> UserBindClient, "\xC", 1, 0);
 				closesocket(This -> UserBindClient);
 				LogOut("Server Thread/INFO", 0, "Kicked %s", lpstrInput + 5);
-				free(This);
+				//free(This);
 			}
 			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
 		}
@@ -287,7 +287,7 @@ void* InputThread(void* lParam) {
 				strcpy(BlackList[i], lpstrInput + 4);
 				if(j == 0) BlackListCount += 1;
 				LogOut("Server Thread/INFO", 0, "Banned %s", lpstrInput + 4);
-				free(This);
+				//free(This);
 			}
 			else LogOut("Server Thread/INFO", 0, "No user named '%s' was found", lpstrInput + 5);
 		}
@@ -471,20 +471,26 @@ void* SocketHandler(void* lParam) {
 								fclose(lpFile);
 							}
 							pthread_mutex_unlock(&thread_lock_Sync);
+							time_t Time;
+							time(&Time);
 							LogOut("Server Thread/INFO", 0, "%s joined the chat room", UL_New -> UserName);
 							struct ULIST *This = UL_Head -> Next;
 							char SendMsg[4];
 							SendMsg[0] = '\xA';
 							SendMsg[1] = strlen(UL_New -> UserName);
 							while(This != NULL) {
-								send(This -> UserBindClient, SendMsg, 2, 0);
+								send(This -> UserBindClient, SendMsg, 1, 0);
+								send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+								send(This -> UserBindClient, SendMsg + 1, 1, 0);
 								send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
 								This = This -> Next;
 							}
 							pthread_mutex_lock(&thread_lock_Sync);
 							lpFile = fopen("configs\\chathistory.nchatserver", "ab");
 							if(lpFile != NULL) {
-								fwrite(SendMsg, sizeof(char), 2, lpFile);
+								fwrite(SendMsg, sizeof(char), 1, lpFile);
+								fwrite(&Time, sizeof(Time), 1, lpFile);
+								fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
 								fwrite(UL_New -> UserName, sizeof(char), SendMsg[1], lpFile);
 								fclose(lpFile);
 							}
@@ -518,8 +524,12 @@ void* SocketHandler(void* lParam) {
 					SendMsg[0] = '\xF';
 					SendMsg[1] = strlen(UL_New -> UserName);
 					recv(ClientSocket, (char*)&iLen, sizeof(iLen), 0);
+					time_t Time;
+					time(&Time);
 					while(This != NULL) {
-						send(This -> UserBindClient, SendMsg, 2, 0);
+						send(This -> UserBindClient, SendMsg, 1, 0);
+						send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+						send(This -> UserBindClient, SendMsg + 1, 1, 0);
 						send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
 						send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
 						This = This -> Next;
@@ -537,7 +547,9 @@ void* SocketHandler(void* lParam) {
 					//pthread_mutex_lock(&thread_lock_Sync);
 					FILE *lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
 					if(lpFileHistory != NULL) {
-						fwrite(SendMsg, sizeof(char), 2, lpFileHistory);
+						fwrite(SendMsg, sizeof(char), 1, lpFileHistory);
+						fwrite(&Time, sizeof(Time), 1, lpFileHistory);
+						fwrite(SendMsg + 1, sizeof(char), 1, lpFileHistory);
 						fwrite(UL_New -> UserName, sizeof(char), SendMsg[1], lpFileHistory);
 						fwrite((const char*)&iLen, sizeof(iLen), 1, lpFileHistory);
 					}
@@ -626,8 +638,11 @@ void* SocketHandler(void* lParam) {
 						free(ReceiveData);
 						This = UL_Head -> Next;
 						FileNameLength = strlen(FileName + 10);
+						time_t Time;
+						time(&Time);
 						while(This != NULL) {
 							send(This -> UserBindClient, "\xE", 1, 0);
+							send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
 							send(This -> UserBindClient, (const char*)&NameLength, sizeof(NameLength), 0);
 							send(This -> UserBindClient, UserName, NameLength, 0);
 							send(This -> UserBindClient, (const char*)&FileNameLength, sizeof(FileNameLength), 0);
@@ -639,6 +654,7 @@ void* SocketHandler(void* lParam) {
 						FILE* lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
 						if(lpFileHistory != NULL) {
 							fwrite("\xE", 1, 1, lpFileHistory);
+							fwrite(&Time, sizeof(Time), 1, lpFileHistory);
 							fwrite((const char*)&NameLength, sizeof(NameLength), 1, lpFileHistory);
 							fwrite(UserName, sizeof(char), NameLength, lpFileHistory);
 							fwrite((const char*)&FileNameLength, sizeof(FileNameLength), 1, lpFileHistory);
@@ -784,15 +800,21 @@ void* SocketHandler(void* lParam) {
 		char SendMsg[4];
 		SendMsg[0] = '\xB';
 		SendMsg[1] = strlen(UL_New -> UserName);
+		time_t Time;
+		time(&Time);
 		while(This != NULL) {
-			send(This -> UserBindClient, SendMsg, 2, 0);
+			send(This -> UserBindClient, SendMsg, 1, 0);
+			send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+			send(This -> UserBindClient, SendMsg + 1, 1, 0);
 			send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
 			This = This -> Next;
 		}
 		pthread_mutex_lock(&thread_lock_Sync);
 		FILE* lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
 		if(lpFileHistory != NULL) {
-			fwrite(SendMsg, sizeof(char), 2, lpFileHistory);
+			fwrite(SendMsg, sizeof(char), 1, lpFileHistory);
+			fwrite(&Time, sizeof(Time), 1, lpFileHistory);
+			fwrite(SendMsg + 1, sizeof(char), 1, lpFileHistory);
 			fwrite(UL_New -> UserName, sizeof(char), SendMsg[1], lpFileHistory);
 			fclose(lpFileHistory);
 		}
