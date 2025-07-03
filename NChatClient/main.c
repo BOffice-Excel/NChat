@@ -191,6 +191,7 @@ unsigned int UsersCount = 0;
 HWND hWndMain, hWndNotify;
 HIMAGELIST hImageList;
 NOTIFYICONDATAA nid;
+pthread_mutex_t Lock;
 struct People {
 	char Name[512];
 	struct People *Next, *Prev;
@@ -206,18 +207,21 @@ struct CHATROOM {
 HFONT hFont, hIconFont;
 HHOOK hFocus;
 SOCKET sockfd;
-FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict__ _Mode) {
+int FileHandleCount = 0;
+FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict__ _Mode, const char* File, int Line) {
 	FILE* lpFile = fopen(_Filename, _Mode);
-	printf("Opened File: %p\n", lpFile);
+	FileHandleCount += 1;
+	printf("Opened File: %p(File: %s, Line: %d, File Handle Count: %d)\n", lpFile, File, Line, FileHandleCount);
 	return lpFile;
 }
-int __cdecl fclose2(FILE *_File) {
+int __cdecl fclose2(FILE *_File, const char* File, int Line) {
 	int iResult = fclose(_File);
-	printf("Closed File: %p\n", _File);
+	FileHandleCount -= 1;
+	printf("Closed File: %p(File: %s, Line: %d, File Handle Count: %d)\n", _File, File, Line, FileHandleCount);
 	return iResult;
 }
-#define fopen fopen2
-#define fclose fclose2
+#define fopen(a, b) fopen2(a, b, __FILE__, __LINE__)
+#define fclose(a) fclose2(a, __FILE__, __LINE__)
 BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL bAlwaysShow) {
 	if(bAlwaysShow == 0 && InFocus == 1) return TRUE;
 	NOTIFYICONDATAA nid2;
@@ -591,6 +595,92 @@ void* RecvMessageThread(void* lParam) {
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New message", lvi.pszText, 0);
 				if(InFocus == FALSE) FlashWindow(hWndMain, FALSE);
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				struct tm* TimeStruct = localtime(&Time);
+				strftime(lvi.pszText, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
+				free(lvi.pszText);
+				break;
+			}
+			case '\x10': {//Be A Silencer
+				time_t Time;
+				int Length = 0, LenTips;
+				char SilencerUserName[32767];
+				memset(SilencerUserName, 0, sizeof(SilencerUserName));
+				sprintf(SilencerUserName, "User ");
+				LenTips = strlen(SilencerUserName);
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
+				recv(sockfd, (char*)&Length, sizeof(char), 0);
+				recv(sockfd, SilencerUserName + LenTips, Length, 0);
+				if(strcmp(SilencerUserName + LenTips, Name) == 0) {
+					EnableWindow(GetDlgItem(hWndMain, 3), FALSE);
+					EnableWindow(GetDlgItem(hWndMain, 9), FALSE);
+					EnableWindow(GetDlgItem(hWndMain, 12), FALSE);
+				}
+				strcat(SilencerUserName, " has been banned from speaking");
+				LVITEMA lvi;
+				lvi.pszText = SilencerUserName;
+				lvi.mask = LVIF_TEXT | LVIF_PARAM;
+				lvi.lParam = MT_SYSTEMNOTIFICATION;
+				lvi.iImage = -1;
+				lvi.iSubItem = 0;
+				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
+				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				lvi.pszText = (char*)calloc(114514, sizeof(char));
+				struct tm* TimeStruct = localtime(&Time);
+				strftime(lvi.pszText, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
+				free(lvi.pszText);
+				break;
+			}
+			case '\x11': {//Remove from Silencers List
+				time_t Time;
+				int Length = 0, LenTips;
+				char SilencerUserName[32767];
+				memset(SilencerUserName, 0, sizeof(SilencerUserName));
+				sprintf(SilencerUserName, "User ");
+				LenTips = strlen(SilencerUserName);
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
+				recv(sockfd, (char*)&Length, sizeof(char), 0);
+				recv(sockfd, SilencerUserName + LenTips, Length, 0);
+				if(strcmp(SilencerUserName + LenTips, Name) == 0) {
+					EnableWindow(GetDlgItem(hWndMain, 3), TRUE);
+					EnableWindow(GetDlgItem(hWndMain, 9), TRUE);
+					EnableWindow(GetDlgItem(hWndMain, 12), TRUE);
+				}
+				strcat(SilencerUserName, " has been unbanned from speaking");
+				LVITEMA lvi;
+				lvi.pszText = SilencerUserName;
+				lvi.mask = LVIF_TEXT | LVIF_PARAM;
+				lvi.lParam = MT_SYSTEMNOTIFICATION;
+				lvi.iImage = -1;
+				lvi.iSubItem = 0;
+				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
+				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				lvi.pszText = (char*)calloc(114514, sizeof(char));
 				struct tm* TimeStruct = localtime(&Time);
 				strftime(lvi.pszText, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
 				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
@@ -1236,7 +1326,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
         case WM_COMMAND: {
         	switch(LOWORD(wParam)) {
         		case 9: {
-        			char *lpstrMessage = (char*)calloc(65534, sizeof(char));
+        			char *lpstrMessage = (char*)calloc(65534, sizeof(char)), Result = 0;
         			unsigned int iLen;
         			GetDlgItemTextA(hWnd, 3, lpstrMessage, 65534);
         			if(lpstrMessage[0] == '\0') {
@@ -1244,11 +1334,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 						break;
 					}
         			iLen = strlen(lpstrMessage) + 1;
+        			//pthread_mutex_lock(&Lock);
         			send(sockfd, "\xB", 1, 0);
-        			send(sockfd, (const char*)&iLen, sizeof(iLen), 0);
-        			send(sockfd, lpstrMessage, iLen, 0);
+        			/*recv(sockfd, &Result, 1, 0);
+        			switch(Result) {
+        				case 0x9: {
+        					MessageBox(hWnd, "Error: You have been banned from speaking!", "Error", MB_ICONWARNING);
+							break;
+						}
+						case 0x0: {*/
+		        			send(sockfd, (const char*)&iLen, sizeof(iLen), 0);
+		        			send(sockfd, lpstrMessage, iLen, 0);
+		        			SetDlgItemTextA(hWnd, 3, "");
+					/*		break;
+						}
+					}*/
+					//pthread_mutex_unlock(&Lock);
         			free(lpstrMessage);
-        			SetDlgItemTextA(hWnd, 3, "");
 					break;
 				}
 				case 12: {
@@ -1658,6 +1760,7 @@ DEFINE_GUID2(IID_IOleObject__,
 	return 0;
 }*/
 int main() {
+	pthread_mutex_init(&Lock, NULL);
 	INITCOMMONCONTROLSEX icex;
 	icex.dwSize = sizeof(icex);
 	icex.dwICC = ICC_LISTVIEW_CLASSES;

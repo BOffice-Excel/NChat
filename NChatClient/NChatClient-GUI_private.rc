@@ -17,8 +17,8 @@ A ICON "NChatClient-GUI.ico"
 // TO CHANGE VERSION INFORMATION, EDIT PROJECT OPTIONS...
 //
 1 VERSIONINFO
-FILEVERSION 1,2,4,331
-PRODUCTVERSION 1,2,4,331
+FILEVERSION 1,2,5,359
+PRODUCTVERSION 1,2,5,359
 FILETYPE VFT_APP
 {
   BLOCK "StringFileInfo"
@@ -26,14 +26,14 @@ FILETYPE VFT_APP
     BLOCK "040904E4"
     {
       VALUE "CompanyName", "NotMyFaults"
-      VALUE "FileVersion", "1.2.4.331"
+      VALUE "FileVersion", "1.2.5.359"
       VALUE "FileDescription", "NChat Client"
       VALUE "InternalName", "NChatClient"
       VALUE "LegalCopyright", ""
       VALUE "LegalTrademarks", ""
       VALUE "OriginalFilename", "NChatClient-GUI.exe"
       VALUE "ProductName", "NChat"
-      VALUE "ProductVersion", "1.2.4.331"
+      VALUE "ProductVersion", "1.2.5.359"
     }
   }
   BLOCK "VarFileInfo"
