@@ -30,9 +30,9 @@ typedef long long		SOCKET;
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
-unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC;
-char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x4";
+unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
+char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
+const char *VersionData = "\x1\x2\x5";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -165,6 +165,7 @@ void* InputThread(void* lParam) {
 				if(j == 1) {
 					RealBLC -= 1;
 					LogOut("Server Thread/INFO", 0, "User %s was removed from the blacklist.", BlackList[i]);
+					free(BlackList[i]);
 					BlackList[i] = NULL;
 				}
 				else LogOut("Server Thread/ERROR", 0, "User %s is not in the blacklist.", lpstrInput + 17);
@@ -234,6 +235,7 @@ void* InputThread(void* lParam) {
 				if(j == 1) {
 					RealWLC -= 1;
 					LogOut("Server Thread/INFO", 0, "User %s was removed from the whitelist.", WhiteList[i]);
+					free(WhiteList[i]);
 					WhiteList[i] = NULL;
 				}
 				else LogOut("Server Thread/ERROR", 0, "User %s is not in the whitelist.", lpstrInput + 17);
@@ -360,6 +362,105 @@ void* InputThread(void* lParam) {
 				free(Data);
 			}
 		}
+		else if(strcmp(lpstrCommand, "silencer") == 0) {
+			if(lpstrInput[8] != ' ') {
+				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command silencer!");
+				continue;
+			}
+			sscanf(lpstrInput + 9, "%s", lpstrCommand);
+			if(strcmp(lpstrCommand, "help") == 0) {
+				LogOut("Server Thread/INFO", 0, "silencer Options: add <UserName>, list, remove <UserName>, help");
+			}
+			else if(strcmp(lpstrCommand, "add") == 0) {
+				if(lpstrInput[12] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command silencer's option add!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= SilencerListCount; i += 1) {
+					if(SilencerList[i] == NULL) {
+						j = 1;
+						break;
+					}
+				}
+				RealSLC += 1;
+				SilencerList[i] = (char*)calloc(strlen(lpstrInput + 13) + 10, sizeof(char));
+				strcpy(SilencerList[i], lpstrInput + 13);
+				if(j == 0) SilencerListCount += 1;
+				struct ULIST *This = UL_Head -> Next;
+				char SendMsg[4];
+				SendMsg[0] = '\x10';
+				SendMsg[1] = strlen(SilencerList[i]);
+				time_t Time;
+				time(&Time);
+				FILE* lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+				fwrite(SendMsg, sizeof(char), 1, lpFile);
+				fwrite(&Time, sizeof(Time), 1, lpFile);
+				fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
+				fwrite(SilencerList[i], sizeof(char), SendMsg[1], lpFile);
+				fclose(lpFile);
+				while(This != NULL) {
+					send(This -> UserBindClient, SendMsg, 1, 0);
+					send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+					send(This -> UserBindClient, SendMsg + 1, 1, 0);
+					send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+					This = This -> Next;
+				}
+				LogOut("Server Thread/INFO", 0, "User %s is a silencer.", SilencerList[i]);
+			}
+			else if(strcmp(lpstrCommand, "remove") == 0) {
+				if(lpstrInput[15] != ' ') {
+					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command silencer's option remove!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= SilencerListCount; i += 1) {
+					if(WhiteList[i] != NULL && strcmp(SilencerList[i], lpstrInput + 16) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					struct ULIST *This = UL_Head -> Next;
+					char SendMsg[4];
+					SendMsg[0] = '\x11';
+					SendMsg[1] = strlen(SilencerList[i]);
+					time_t Time;
+					time(&Time);
+					FILE* lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+					fwrite(SendMsg, sizeof(char), 1, lpFile);
+					fwrite(&Time, sizeof(Time), 1, lpFile);
+					fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
+					fwrite(SilencerList[i], sizeof(char), SendMsg[1], lpFile);
+					fclose(lpFile);
+					while(This != NULL) {
+						send(This -> UserBindClient, SendMsg, 1, 0);
+						send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+						send(This -> UserBindClient, SendMsg + 1, 1, 0);
+						send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+						This = This -> Next;
+					}
+					RealSLC -= 1;
+					LogOut("Server Thread/INFO", 0, "User %s is already not a silencer now.", SilencerList[i]);
+					free(SilencerList[i]);
+					SilencerList[i] = NULL;
+				}
+				else LogOut("Server Thread/ERROR", 0, "User %s was not a silencer.", lpstrInput + 17);
+			}
+			else if(strcmp(lpstrCommand, "list") == 0) {
+				LogOut("Server Thread/INFO", 1, "There are %d silencers: ", RealSLC);
+				j = 0;
+				for(i = 1; i <= SilencerListCount; i += 1) {
+					if(SilencerList[i] != NULL) {
+						if(j == 1) printf(", ");
+						printf("%s", SilencerList[i]);
+						j = 1;
+					}
+				}
+				printf("\n");
+			}
+			else LogOut("Server Thread/ERROR", 0, "silencer %s<-- Unknown Option", lpstrCommand);
+		} 
 		else if(strcmp(lpstrCommand, "help") == 0) {
 			LogOut("Server Thread/INFO", 0, "Commands: \n\
   ban -> Ban a user(ban = blacklist add + kick), Method: ban <UserName: String>\n\
@@ -371,6 +472,7 @@ void* InputThread(void* lParam) {
   kick -> Kick user out of the room, Method: kick <User Name: String>\n\
   roomname -> Set or query the chat room name, Method: roomname [New Room Name: String]\n\
   say -> Say something..., Method: say <Something you want to say: String>\n\
+  silencer -> Manage the Silencer List, Method: silencer <add, help, list, remove> [User Name(Only add or remove option): String]\n\
   viewmsg -> View the message details in the past, Method: viewmsg <Message Id: Int>\n\
   whitelist -> Manage the whitelist, Method: whitelist <add, disable, enable, help, list, remove> [User Name(Only add or remove option): String]");
 		}
@@ -518,8 +620,19 @@ void* SocketHandler(void* lParam) {
 #else
 					__int64_t iSize;//Linux just use __int64_t
 #endif
+					int i, isOk = 0;
+					for(i = 0; i <= SilencerListCount; i += 1) {
+						if(SilencerList[i] != NULL && strcmp(UL_New -> UserName, SilencerList[i]) == 0) {
+							//send(ClientSocket, "\x9", 1, 0);
+							isOk = 1;
+							break;
+						}
+					}
+					//if(isOk == 1) break;
+					//send(ClientSocket, "\x0", 1, 0);
 					unsigned int iLen, iCount = 0;
 					struct ULIST *This = UL_Head -> Next;
+					if(isOk == 1) This = NULL;
 					char SendMsg[4];
 					SendMsg[0] = '\xF';
 					SendMsg[1] = strlen(UL_New -> UserName);
@@ -534,56 +647,67 @@ void* SocketHandler(void* lParam) {
 						send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
 						This = This -> Next;
 					}
-					char FileName[32767];
+					if(isOk == 0) {
+						char FileName[32767];
 #ifdef _WIN32
-					sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
+						sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
 #else
-					sprintf(FileName, "ChatMessages/Message-%lld.nmsg", MessagesCount);
+						sprintf(FileName, "ChatMessages/Message-%lld.nmsg", MessagesCount);
 #endif
-					FILE *lpFile = fopen(FileName, "w");
-					if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
-					else fprintf(lpFile, "<%s> ", UL_New -> UserName);
-					LogOut("Server Thread/INFO", 1, "[Message-%lld] <%s> ", MessagesCount, UL_New -> UserName);//Who sent the message
-					//pthread_mutex_lock(&thread_lock_Sync);
-					FILE *lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
-					if(lpFileHistory != NULL) {
-						fwrite(SendMsg, sizeof(char), 1, lpFileHistory);
-						fwrite(&Time, sizeof(Time), 1, lpFileHistory);
-						fwrite(SendMsg + 1, sizeof(char), 1, lpFileHistory);
-						fwrite(UL_New -> UserName, sizeof(char), SendMsg[1], lpFileHistory);
-						fwrite((const char*)&iLen, sizeof(iLen), 1, lpFileHistory);
-					}
-					while(iCount < iLen) {
-						memset(ReceiveData, 0, sizeof(ReceiveData));
-						iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
-						if(iResult <= 0) break;
-						iCount += iResult;
-						if(lpFile != NULL) fprintf(lpFile, "%s", ReceiveData);
-						This = UL_Head -> Next;
-						while(This != NULL) {
-							send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
-							This = This -> Next;
+						FILE *lpFile = fopen(FileName, "w");
+						if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
+						else fprintf(lpFile, "<%s> ", UL_New -> UserName);
+						LogOut("Server Thread/INFO", 1, "[Message-%lld] <%s> ", MessagesCount, UL_New -> UserName);//Who sent the message
+						//pthread_mutex_lock(&thread_lock_Sync);
+						FILE *lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
+						if(lpFileHistory != NULL) {
+							fwrite(SendMsg, sizeof(char), 1, lpFileHistory);
+							fwrite(&Time, sizeof(Time), 1, lpFileHistory);
+							fwrite(SendMsg + 1, sizeof(char), 1, lpFileHistory);
+							fwrite(UL_New -> UserName, sizeof(char), SendMsg[1], lpFileHistory);
+							fwrite((const char*)&iLen, sizeof(iLen), 1, lpFileHistory);
 						}
-						if(lpFileHistory != NULL) fwrite(ReceiveData, sizeof(char), iResult, lpFileHistory);
-						if(iCount <= iResult) {
-							int i, Disabled = 0;
-							for(i = 0; i < 30; i += 1) {
-								if(ReceiveData[i] == '\n' || ReceiveData[i] == '\r') {
-									strcpy(ReceiveData + i, "...(More)");
-									Disabled = 1;
-									break;
-								}
+						while(iCount < iLen) {
+							memset(ReceiveData, 0, sizeof(ReceiveData));
+							iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
+							if(iResult <= 0) break;
+							iCount += iResult;
+							if(lpFile != NULL) fprintf(lpFile, "%s", ReceiveData);
+							This = UL_Head -> Next;
+							while(This != NULL) {
+								send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
+								This = This -> Next;
 							}
-							if(Disabled == 0) ReceiveData[30] = '\0';
-							printf("%s", ReceiveData);//Print Message
+							if(lpFileHistory != NULL) fwrite(ReceiveData, sizeof(char), iResult, lpFileHistory);
+							if(iCount <= iResult) {
+								int i, Disabled = 0;
+								for(i = 0; i < 30; i += 1) {
+									if(ReceiveData[i] == '\n' || ReceiveData[i] == '\r') {
+										strcpy(ReceiveData + i, "...(More)");
+										Disabled = 1;
+										break;
+									}
+								}
+								if(Disabled == 0) ReceiveData[30] = '\0';
+								printf("%s", ReceiveData);//Print Message
+							}
+							//if(iResult < sizeof(ReceiveData) - 1) break;
 						}
-						//if(iResult < sizeof(ReceiveData) - 1) break;
+						if(lpFile != NULL) fclose(lpFile);
+						if(lpFileHistory != NULL) fclose(lpFileHistory);
+						//pthread_mutex_unlock(&thread_lock_Sync);
+						printf("\n");
+						MessagesCount += 1;
 					}
-					if(lpFile != NULL) fclose(lpFile);
-					if(lpFileHistory != NULL) fclose(lpFileHistory);
-					//pthread_mutex_unlock(&thread_lock_Sync);
-					printf("\n");
-					MessagesCount += 1;
+					else {
+						LogOut("Server Thread/WARN", 0, "Silencer '%s' is trying to send message.", UL_New -> UserName);
+						char UselessBuffer_For_Stupids[114514];
+						while(iCount < iLen) {
+							iResult = recv(ClientSocket, UselessBuffer_For_Stupids, sizeof(UselessBuffer_For_Stupids) - 1, 0);//Read Message
+							if(iResult <= 0) break;
+							iCount += iResult;
+						}
+					}
 					break;
 				}
 				case 0xC: {//Send Message(File) 
@@ -602,6 +726,17 @@ void* SocketHandler(void* lParam) {
 						send(ClientSocket, "\x8|ERR_USER_DIDNOTLOGIN", 22, 0);
 					}
 					else {
+						int i, isOk = 0;
+						for(i = 0; i <= SilencerListCount; i += 1) {
+							if(SilencerList[i] != NULL && strcmp(UserName, SilencerList[i]) == 0) {
+								isOk = 1;
+								break;
+							}
+						}
+						if(isOk == 1) {
+							send(ClientSocket, "\x9|ERR_BE_SILENT", 15, 0);
+							goto ContinueUploadFile;
+						}
 						send(ClientSocket, "\x0", 1, 0);
 #ifdef _WIN32
 						strcpy(FileName, "ChatFiles\\");
@@ -665,6 +800,7 @@ void* SocketHandler(void* lParam) {
 						pthread_mutex_unlock(&thread_lock_Sync);
 						LogOut("Server Thread/INFO", 0, "User %s sent a file named '%s'(Size: %.2lf Kib).", UserName, FileName + 10, FileSize * 1.0 / 1024.0);
 					}
+					ContinueUploadFile:
 					closesocket(ClientSocket);
 					return NULL;
 					break;
