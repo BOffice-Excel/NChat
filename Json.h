@@ -29,12 +29,10 @@ typedef struct tagJSONOBJ{
 	JsonObjectType FatherMask;
 	struct tagJSONOBJ *Next;
 	int DoubleLength;
-	union{
-		char *lpstrValue;
-		struct tagJSONOBJ *Childs;
-		int TorF;
-		double Number;
-	};
+	char *lpstrValue;
+	struct tagJSONOBJ *Childs;
+	int TorF;
+	double Number;
 }JSONOBJ,*LPJSONOBJ;
 void WriteOutJsonText(char *DestJsonText,LPJSONOBJ lpJsonObj,JsonObjectType FatherType){
 	int idx=0;
@@ -357,8 +355,10 @@ LPJSONOBJ BuildJson(const char *JsonText,int Length,JsonObjectType *FatherType){
 void CloseJson(LPJSONOBJ JsonLst){
 	while(JsonLst!=NULL){
 		if(JsonLst->iMask==OT_CHILD||JsonLst->iMask==OT_LIST) CloseJson(JsonLst->Childs);
-		LPJSONOBJ Old=JsonLst;
-		JsonLst=JsonLst->Next;
+		LPJSONOBJ Old = JsonLst;
+		if(JsonLst -> lpstrValue != NULL) free(JsonLst -> lpstrValue);
+		if(JsonLst -> lpstrKey != NULL) free(JsonLst -> lpstrKey);
+		JsonLst = JsonLst -> Next;
 		free(Old);
 	}
 	return;
