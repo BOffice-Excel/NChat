@@ -211,6 +211,7 @@ int FileHandleCount = 0, MemoryPointerCount = 0;
 FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict__ _Mode, const char* File, int Line) {
 	FILE* lpFile = fopen(_Filename, _Mode);
 	if(lpFile != NULL) {
+		errno = 0;
 		FileHandleCount += 1;
 		printf("[File Manager/INFO] Opened File: %p(OF: %s, Mode: %s, File: %s, Line: %d, File Handle Count: %d)\n", lpFile, _Filename, _Mode, File, Line, FileHandleCount);
 	}
@@ -1314,8 +1315,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_DEFPUSHBUTTON, 0, 0, 0, 0, hWnd, (HMENU)9, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Auto Scroll To Bottom",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)10, NULL, NULL);
-			CreateWindowExA(0, "BUTTON", "Always show notifications",
-				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)11, NULL, NULL);
+			//CreateWindowExA(0, "BUTTON", "Always show notifications",
+			//	WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)11, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Send A File",
 				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)12, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
@@ -1562,6 +1563,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 							lvi.cchTextMax = 32767;
 							char *Text = (char*)calloc(114514, sizeof(char));
 							ListView_GetItem(GetDlgItem(hWnd, 8), &lvi);
+							GetDlgItemTextA(hWnd, 3, Text, 114514); 
 							if(strlen(lvi.pszText) + strlen(Text) + 2 <= 32766) {
 								sprintf(Text + strlen(Text), "@%s ", lvi.pszText);
 								SetDlgItemText(hWnd, 3, Text);
