@@ -32,7 +32,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x6";
+const char *VersionData = "\x1\x2\x7";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -86,10 +86,10 @@ void* InputThread(void* lParam) {
 		sscanf(lpstrInput, "%s", lpstrCommand);
 		if(strcmp(lpstrCommand, "exit") == 0) {
 			//LogOut("Server Thread/INFO", 0, "Stopping the Server");
-			closesocket(ListenSocket);/*
+			closesocket(ListenSocket);
 #ifdef _WIN32
 			WSACleanup();
-#endif*/
+#endif
 			return NULL;
 		}
 		else if(strcmp(lpstrCommand, "list") == 0) {
@@ -135,6 +135,17 @@ void* InputThread(void* lParam) {
 			else if(strcmp(lpstrCommand, "add") == 0) {
 				if(lpstrInput[13] != ' ') {
 					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command blacklist's option add!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= BlackListCount; i += 1) {
+					if(BlackList[i] != NULL && strcmp(BlackList[i], lpstrInput + 14) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					LogOut("Server Thread/ERROR", 0, "There was already a user named '%s' in the blacklist.", lpstrInput + 14);
 					continue;
 				}
 				j = 0;
@@ -205,6 +216,17 @@ void* InputThread(void* lParam) {
 			else if(strcmp(lpstrCommand, "add") == 0) {
 				if(lpstrInput[13] != ' ') {
 					LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command whitelist's option add!");
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= WhiteListCount; i += 1) {
+					if(WhiteList[i] != NULL && strcmp(WhiteList[i], lpstrInput + 14) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					LogOut("Server Thread/ERROR", 0, "There was already a user named '%s' in the whitelist.", lpstrInput + 14);
 					continue;
 				}
 				j = 0;
@@ -378,6 +400,17 @@ void* InputThread(void* lParam) {
 				}
 				j = 0;
 				for(i = 1; i <= SilencerListCount; i += 1) {
+					if(SilencerList[i] != NULL && strcmp(SilencerList[i], lpstrInput + 13) == 0) {
+						j = 1;
+						break;
+					}
+				}
+				if(j == 1) {
+					LogOut("Server Thread/ERROR", 0, "%s is already a silencer.", lpstrInput + 13);
+					continue;
+				}
+				j = 0;
+				for(i = 1; i <= SilencerListCount; i += 1) {
 					if(SilencerList[i] == NULL) {
 						j = 1;
 						break;
@@ -393,7 +426,11 @@ void* InputThread(void* lParam) {
 				SendMsg[1] = strlen(SilencerList[i]);
 				time_t Time;
 				time(&Time);
-				FILE* lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#ifdef _WIN32
+				FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+				FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
 				fwrite(SendMsg, sizeof(char), 1, lpFile);
 				fwrite(&Time, sizeof(Time), 1, lpFile);
 				fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
@@ -427,7 +464,11 @@ void* InputThread(void* lParam) {
 					SendMsg[1] = strlen(SilencerList[i]);
 					time_t Time;
 					time(&Time);
-					FILE* lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#ifdef _WIN32
+					FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+					FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
 					fwrite(SendMsg, sizeof(char), 1, lpFile);
 					fwrite(&Time, sizeof(Time), 1, lpFile);
 					fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
@@ -521,7 +562,6 @@ void* SocketHandler(void* lParam) {
 							unsigned char BytesOfUserName, State = 0x00;
 							recv(ClientSocket, (char*)&BytesOfUserName, 1, 0);
 							UL_New = (struct ULIST*)calloc(1, sizeof(struct ULIST));
-							UL_Last -> Next = UL_New;
 							UL_New -> Last = UL_Last;
 							recv(ClientSocket, UL_New -> UserName, BytesOfUserName, 0);
 							int i;
@@ -558,11 +598,33 @@ void* SocketHandler(void* lParam) {
 								free(UL_New);
 								return NULL;
 							}
+							State = 0x0;
+							ULIST *This_Check = UL_Head -> Next;
+							while(This_Check != NULL) {
+								if(strcmp(UL_New -> UserName, This_Check -> UserName) == 0) {
+									State = 0x1;
+									break;
+								}
+								This_Check = This_Check -> Next;
+							}
+							if(State == 0x1) {
+								send(ClientSocket, "\xB|ERR_SAME_NAME", 15, 0);
+								closesocket(ClientSocket);
+								UL_New -> Last -> Next = UL_New -> Next;
+								if(UL_New -> Next != NULL) UL_New -> Next -> Last = UL_New -> Last;
+								free(UL_New);
+								return NULL;
+							}
+							UL_Last -> Next = UL_New;
 							UL_New -> UserBindClient = ClientSocket;
 							UL_Last = UL_New;
 							send(ClientSocket, "\x1", 1, 0);
 							pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
 							FILE *lpFile = fopen("configs\\chathistory.nchatserver", "rb");
+#else
+							FILE *lpFile = fopen("configs/chathistory.nchatserver", "rb");
+#endif
 							if(lpFile != NULL) {
 								char *Data = (char*)calloc(32767, sizeof(char));
 								int iRead;
@@ -588,7 +650,11 @@ void* SocketHandler(void* lParam) {
 								This = This -> Next;
 							}
 							pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
 							lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+							lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
 							if(lpFile != NULL) {
 								fwrite(SendMsg, sizeof(char), 1, lpFile);
 								fwrite(&Time, sizeof(Time), 1, lpFile);
@@ -659,7 +725,11 @@ void* SocketHandler(void* lParam) {
 						else fprintf(lpFile, "<%s> ", UL_New -> UserName);
 						LogOut("Server Thread/INFO", 1, "[Message-%lld] <%s> ", MessagesCount, UL_New -> UserName);//Who sent the message
 						//pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
 						FILE *lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+						FILE *lpFileHistory = fopen("configs/chathistory.nchatserver", "ab");
+#endif
 						if(lpFileHistory != NULL) {
 							fwrite(SendMsg, sizeof(char), 1, lpFileHistory);
 							fwrite(&Time, sizeof(Time), 1, lpFileHistory);
@@ -1035,6 +1105,25 @@ int main() {
 			}
 			fclose(lpConfig);
 		}
+		lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\silencerlist.nchatserver"
+#else
+	"configs/silencerlist.nchatserver"
+#endif
+	, "rb");
+		if(lpConfig != NULL) {
+			fread(&SilencerListCount, sizeof(SilencerListCount), 1, lpConfig);
+			RealSLC = SilencerListCount;
+			for(iEnum = 1; iEnum <= SilencerListCount; iEnum += 1) {
+				fread(&ICSize, sizeof(char), 1, lpConfig);
+				SilencerList[iEnum] = (char*)calloc(ICSize + 10, sizeof(char));
+				fread(SilencerList[iEnum], sizeof(char), ICSize + 1, lpConfig);
+				if(SilencerList[iEnum][ICSize] != 0x40) LogOut("Server Thread/WARN", 0, "There is a mistake in silencer list: The %dth silencer list user should have 0x40 as the terminator.", iEnum);
+				SilencerList[iEnum][ICSize] = '\0';
+			}
+			fclose(lpConfig);
+		}
 	}
 	else for(iEnum = 0; iEnum < 128; iEnum++) {
 		int iRand = rand() % 62;
@@ -1173,6 +1262,26 @@ int main() {
 		}
 		fclose(lpConfig);
 		LogOut("Server Close/INFO", 0, "Whitelist saved.");
+	}
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\silencerlist.nchatserver"
+#else
+	"configs/silencerlist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&RealSLC, sizeof(RealSLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= SilencerListCount; iEnum += 1) {
+			if(SilencerList[iEnum] != NULL) {
+				iTmp = strlen(SilencerList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(SilencerList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x40", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Silencerlist saved.");
 	}
 	return 0;
 }
