@@ -32,7 +32,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x7";
+const char *VersionData = "\x1\x2\x8";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -599,7 +599,7 @@ void* SocketHandler(void* lParam) {
 								return NULL;
 							}
 							State = 0x0;
-							ULIST *This_Check = UL_Head -> Next;
+							struct ULIST *This_Check = UL_Head -> Next;
 							while(This_Check != NULL) {
 								if(strcmp(UL_New -> UserName, This_Check -> UserName) == 0) {
 									State = 0x1;
@@ -833,7 +833,8 @@ void* SocketHandler(void* lParam) {
 						}
 						else send(ClientSocket, "\x0", 1, 0);
 						char *ReceiveData = (char*)calloc(32767, sizeof(char));
-						unsigned int FileSize = 0, BytesReadCount = 0, BytesRead;
+						//unsigned int FileSize = 0, BytesReadCount = 0, BytesRead;
+						_off64_t FileSize = 0, BytesReadCount = 0, BytesRead;
 						recv(ClientSocket, (char*)&FileSize, sizeof(FileSize), 0);
 						while(BytesReadCount < FileSize) {
 							BytesReadCount += BytesRead = recv(ClientSocket, ReceiveData, 32767, 0);
@@ -932,10 +933,12 @@ void* SocketHandler(void* lParam) {
 						else {
 							send(ClientSocket, "\x0", 1, 0);
 							char *ReadData = (char*)calloc(32767, sizeof(char));
-							fseek(lpFile, 0, SEEK_END);
-							unsigned int Size = ftell(lpFile), BytesRead = 0;
+							fseeko64(lpFile, 0, SEEK_END);
+							//unsigned int Size = ftell(lpFile), BytesRead = 0;
+							_off64_t Size = ftello64(lpFile), BytesRead = 0;
+							//fgetpos(lpFile, &Size);
 							send(ClientSocket, (const char*)&Size, sizeof(Size), 0);
-							fseek(lpFile, 0, SEEK_SET);
+							fseeko64(lpFile, 0, SEEK_SET);
 							LogOut("Server Thread/INFO", 0, "User %s is downloading file '%s'(Size: %.2lf Kib).", UserName, FileName + 10, Size * 1.0 / 1024);
 							while((BytesRead = fread(ReadData, sizeof(char), 32767, lpFile)) > 0) {
 								send(ClientSocket, ReadData, BytesRead, 0);
