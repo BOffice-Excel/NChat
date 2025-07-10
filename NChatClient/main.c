@@ -516,7 +516,8 @@ void* RecvMessageThread(void* lParam) {
 				char UserName[512], FileName[512];
 				memset(UserName, 0, sizeof(UserName));
 				memset(FileName, 0, sizeof(FileName));
-				unsigned int FileSize;
+				//unsigned int FileSize;
+				fpos_t FileSize;
 				unsigned char UserNameLength, FileNameLength;
 				time_t Time;
 				recv(sockfd, (char*)&Time, sizeof(Time), 0);
@@ -550,7 +551,24 @@ void* RecvMessageThread(void* lParam) {
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New file", lvi.pszText, 0);
 				lvi.iSubItem = 1;
 				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
-				sprintf(lvi.pszText, "%.2lf Kib", FileSize * 1.0 / 1024.0);
+				if(FileSize < 1024.0) {
+					sprintf(lvi.pszText, "%lld Bytes", FileSize);
+				}
+				else if(FileSize * 1.0 / 1024.0 < 1024.0) {
+					sprintf(lvi.pszText, "%.2lf Kib", FileSize * 1.0 / 1024.0);
+				}
+				else if(FileSize * 1.0 / 1024.0 / 1024.0 < 1024.0) {
+					sprintf(lvi.pszText, "%.2lf Mib", FileSize * 1.0 / 1024.0 / 1024.0);
+				}
+				else if(FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0 < 1024.0) {
+					sprintf(lvi.pszText, "%.2lf Gib", FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0);
+				}
+				else if(FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0 < 1024.0) {
+					sprintf(lvi.pszText, "%.2lf Tib", FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0);
+				}
+				else if(FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0 < 1024.0) {
+					sprintf(lvi.pszText, "%.2lf Pib", FileSize * 1.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0 / 1024.0);
+				}
 				lvi.iSubItem = 2;
 				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 2, lvi.pszText);
 				free(lvi.pszText);
@@ -775,10 +793,13 @@ void *UploadFile(void *lParam) {
 	    free(ReadData);
 	    return FALSE;
 	}
-	unsigned int size;//Task: Convert to fpos_t type
-	fseek(lpFile, 0, SEEK_END);
-	size = ftell(lpFile);
-	fseek(lpFile, 0, SEEK_SET);
+	//unsigned int size;//Task: Convert to fpos_t type
+	_off64_t size = 0;
+	fseeko64(lpFile, 0, SEEK_END);
+	//size = ftell(lpFile);
+	size = ftello64(lpFile);
+	//fgetpos(lpFile, &size);
+	fseeko64(lpFile, 0, SEEK_SET);
 	
 	struct addrinfo hints, *res;
 	int status;
@@ -867,7 +888,10 @@ void *DownloadingFileThread(void *lParam) {
 	HWND hWndOwner = (HWND)lParam;
 	char *FileName = (char*)calloc(32767, sizeof(char)), *DownloadPath = (char*)calloc(32767, sizeof(char)), *Details = (char*)calloc(32767, sizeof(char)), *ReadData = (char*)calloc(32767, sizeof(char)), ErrMsg[32767], NameLength, iReceive;
 	strcpy(FileName, (char*)GetPropA(hWndOwner, "FileName"));
+	free(GetPropA(hWndOwner, "FileName"));
 	strcpy(DownloadPath, (char*)GetPropA(hWndOwner, "DownloadPath"));
+	free(GetPropA(hWndOwner, "DownloadPath"));
+	printf("DownloadPath: %s\nFileName: %s\n", DownloadPath, FileName);
 	sprintf(Details, "File '%s' is downloading...", FileName);
 	ShowToastMessage(NIIF_INFO, "File Downloading is In Progress", Details, 1);
 	
@@ -947,7 +971,8 @@ void *DownloadingFileThread(void *lParam) {
     	return NULL;
 	}
 	FILE* lpFile = fopen(DownloadPath, "wb");
-	unsigned int Size = 0;
+	//unsigned int Size = 0;
+	_off64_t Size = 0;
 	recv(sockfd2, (char*)&Size, sizeof(Size), 0);
 	while((iResult = recv(sockfd2, ReadData, 32767, 0)) > 0) {
 		fwrite(ReadData, sizeof(char), iResult, lpFile);
@@ -1647,8 +1672,10 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 		case WM_TIMER: {
 			switch(wParam) {
 				case 1: {
-					char *lpstrDetails = (char*)calloc(32767, sizeof(char));
+					char *lpstrDetails = (char*)calloc(32767, sizeof(char)), *lpstrFileName = (char*)calloc(32767, sizeof(char));
 					sprintf(lpstrDetails, "File: %s", (char*)GetPropA(hWnd, "FileName"));
+					strcpy(lpstrFileName, (char*)GetPropA(hWnd, "FileName"));
+					SetPropA(hWnd, "FileName", lpstrFileName);
 					SetDlgItemText(hWnd, 2, lpstrDetails);
 					free(lpstrDetails);
 					break;
@@ -1665,8 +1692,11 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					ofn.lpstrFile = (LPSTR)calloc(32767, sizeof(char));
 					ofn.nMaxFile = 32767;
 					ofn.lpstrFilter = "All Files(*.*)\0*.*\0\0";
+					ofn.nFilterIndex = 1;
 					ofn.hwndOwner = hWnd;
-					strcpy(ofn.lpstrFile, GetPropA(hWnd, "FileName"));
+					ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_OVERWRITEPROMPT;
+					//strcpy(ofn.lpstrFile, GetPropA(hWnd, "FileName"));
+					ofn.lpstrTitle = GetPropA(hWnd, "FileName");
 					SetPropA(hWnd, "DownloadPath", ofn.lpstrFile);
 					if(GetSaveFileNameA(&ofn) == FALSE) {
 						free(ofn.lpstrFile);
@@ -1675,7 +1705,7 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
 					pthread_t ptid_t;
 					pthread_create(&ptid_t, NULL, DownloadingFileThread, (void*)hWnd);
 					Sleep(200);
-					free(ofn.lpstrFile);
+					//free(ofn.lpstrFile);
 					DestroyWindow(hWnd);
 					break;
 				}
