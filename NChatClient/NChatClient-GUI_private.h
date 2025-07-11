@@ -5,19 +5,19 @@
 #define NCHATCLIENT-GUI_PRIVATE_H
 
 /* VERSION DEFINITIONS */
-#define VER_STRING	"1.2.9.438"
+#define VER_STRING	"1.2.10.445"
 #define VER_MAJOR	1
 #define VER_MINOR	2
-#define VER_RELEASE	9
-#define VER_BUILD	438
+#define VER_RELEASE	10
+#define VER_BUILD	445
 #define COMPANY_NAME	"NotMyFaults"
-#define FILE_VERSION	"1.2.9.438"
+#define FILE_VERSION	"1.2.10.445"
 #define FILE_DESCRIPTION	"NChat Client"
 #define INTERNAL_NAME	"NChatClient"
 #define LEGAL_COPYRIGHT	""
 #define LEGAL_TRADEMARKS	""
 #define ORIGINAL_FILENAME	"NChatClient-GUI.exe"
 #define PRODUCT_NAME	"NChat"
-#define PRODUCT_VERSION	"1.2.9.438"
+#define PRODUCT_VERSION	"1.2.10.445"
 
 #endif /*NCHATCLIENT-GUI_PRIVATE_H*/

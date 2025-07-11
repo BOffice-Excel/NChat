@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <exdisp.h>
 #include <exdispid.h>
+#include <windowsx.h>
 #include "NChatClient-GUI_private.h"
 #define key_press(key) (GetAsyncKeyState(key)&0x8000) //Define macro for detect keyboard
 /*typedef struct IOleObjectVtbl2 {
@@ -1437,6 +1438,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
         }
         case WM_COMMAND: {
         	switch(LOWORD(wParam)) {
+        		/*case 3: {
+        			switch(HIWORD(wParam)) {
+        				case EN_RETURN: {
+        					SendMessage(hWnd, WM_COMMAND, 9, 0);
+							break;
+						}
+					}
+					break;
+				} */
         		case 9: {
         			char *lpstrMessage = (char*)calloc(65534, sizeof(char)), Result = 0;
         			unsigned int iLen;
