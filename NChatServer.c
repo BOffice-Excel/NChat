@@ -33,7 +33,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\x9";
+const char *VersionData = "\x1\x2\xA";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -59,7 +59,27 @@ void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
     localTime = localtime(&CurrentTime);
     strftime(LogBuf, sizeof(LogBuf), "%Y-%m-%d %H:%M:%S", localTime);
     vsprintf(LogBuf2, Format, v);
-    printf("[%s] [%s]: %s", LogBuf, Poster, LogBuf2);
+    printf("\033[34m[\033[33m%s\033[34m]\033[0m \033[34m[\033[0m", LogBuf);
+    int i;
+    for(i = 0; i < strlen(Poster); i += 1) {
+    	if(Poster[i] == '/') {
+    		if(strcmp(Poster + i + 1, "INFO") == 0) {
+    			printf("/\033[32mINFO\033[0m");
+			}
+    		else if(strcmp(Poster + i + 1, "WARN") == 0) {
+    			printf("/\033[33mWARN\033[0m");
+			}
+    		else if(strcmp(Poster + i + 1, "ERROR") == 0) {
+    			printf("/\033[31mERROR\033[0m");
+			}
+			else {
+				printf("%s", Poster + i);
+			}
+			break;
+		}
+		printf("%c", Poster[i]);
+	}
+	printf("\033[34m]\033[0m: %s", LogBuf2);
     if(NoNewLine == 0) printf("\n");
 	va_end(v);
 	return ;
@@ -343,8 +363,11 @@ void* InputThread(void* lParam) {
 			}
 			struct ULIST *This = UL_Head;
 			int iLength = strlen(lpstrInput + 4);
+			time_t Time = time(NULL);
 			while(This != NULL) {
-				send(This -> UserBindClient, "\xF\x6Server", 8, 0);
+				send(This -> UserBindClient, "\xF", 1, 0); 
+				send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+				send(This -> UserBindClient, "\x6Server", 7, 0);
 				send(This -> UserBindClient, (const char*)&iLength, sizeof(iLength), 0);
 				send(This -> UserBindClient, lpstrInput + 4, iLength, 0);
 				This = This -> Next;
@@ -359,6 +382,19 @@ void* InputThread(void* lParam) {
 			if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
 			else {
 				fprintf(lpFile, "<Server> %s", lpstrInput + 4);
+				fclose(lpFile);
+			}
+#ifdef _WIN32
+			lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+			lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+			if(lpFile != NULL) {
+				fwrite("\xF", 1, 1, lpFile);
+				fwrite(&Time, sizeof(Time), 1, lpFile);
+				fwrite("\x6Server", sizeof(char), 7, lpFile);
+				fwrite((const char*)&iLength, sizeof(iLength), 1, lpFile);
+				fwrite(lpstrInput + 4, sizeof(char), iLength, lpFile);
 				fclose(lpFile);
 			}
 			LogOut("Server Thread/INFO", 0, "[Message-%lld] <Server> %s", MessagesCount, lpstrInput + 4);
@@ -487,7 +523,7 @@ void* InputThread(void* lParam) {
 					free(SilencerList[i]);
 					SilencerList[i] = NULL;
 				}
-				else LogOut("Server Thread/ERROR", 0, "User %s was not a silencer.", lpstrInput + 17);
+				else LogOut("Server Thread/ERROR", 0, "User %s was not a silencer.", lpstrInput + 16);
 			}
 			else if(strcmp(lpstrCommand, "list") == 0) {
 				LogOut("Server Thread/INFO", 1, "There are %d silencers: ", RealSLC);
@@ -1066,6 +1102,7 @@ int main() {
 	"configs/config.nchatserver"
 #endif
 	, "rb");
+	srand(time(NULL));
 	if(lpConfig != NULL) {
 		fread(InvitationCode, sizeof(char), 25, lpConfig);
 		if(memcmp(InvitationCode, "NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", 25) == 0) {
@@ -1163,35 +1200,35 @@ int main() {
 #ifdef _WIN32 //Windows Server
 	WSADATA wsaData;
 	if(WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		LogOut("Server Startup/ERROR", 0, "WSAStartup failed!");
+		LogOut("Server Startup/ERROR", 0, "WSAStartup \033[31mfailed\033[0m!");
 		return -1;
 	}
-	LogOut("Server Startup/INFO", 0, "Initialized WinSock2 successfully.");
+	LogOut("Server Startup/INFO", 0, "Initialized WinSock2 \033[32msuccessfully\033[0m.");
 #endif //_WIN32
 	SOCKET ClientSocket;
 	ListenSocket = socket(AF_INET, SOCK_STREAM, 0);
 	if(ListenSocket == INVALID_SOCKET) {
-		LogOut("Server Startup/ERROR", 0, "Socket Failed!");
+		LogOut("Server Startup/ERROR", 0, "Socket \033[31mFailed\033[0m!");
 #ifdef _WIN32
 		WSACleanup();
 #endif //_WIN32
 		return 1;
 	}
-	LogOut("Server Startup/INFO", 0, "Create socket successfully.");
+	LogOut("Server Startup/INFO", 0, "Create socket \033[32msuccessfully\033[0m.");
 	struct sockaddr_in SockAddr;
 	SockAddr.sin_family = AF_INET;
 	SockAddr.sin_port = htons(ListenPort);
 	SockAddr.sin_addr.s_addr = htonl(INADDR_ANY); 
 	iResult = bind(ListenSocket, (struct sockaddr*)&SockAddr, sizeof(SockAddr));
 	if(iResult == SOCKET_ERROR) {
-		LogOut("Server Startup/ERROR", 0, "Bind Listening Failed!");
+		LogOut("Server Startup/ERROR", 0, "Bind Listening \033[31mFailed\033[0m!");
 		closesocket(ListenSocket);
 #ifdef _WIN32
 		WSACleanup();
 #endif //_WIN32
 		return 1;
 	}
-	LogOut("Server Startup/INFO", 0, "Bind Listening Port successfully.");
+	LogOut("Server Startup/INFO", 0, "Bind Listening Port \033[32msuccessfully\033[0m.");
 	iResult = listen(ListenSocket, 114514);
 	if(iResult == SOCKET_ERROR) {
 		LogOut("Server Startup/ERROR", 0, "Listen Failed!");
@@ -1201,9 +1238,9 @@ int main() {
 #endif
 		return 1;
 	}
-	LogOut("Server Startup/INFO", 0, "Set queue of listening successfully.");
-	LogOut("Server Startup/INFO", 0, "Your Invitation Code is %s.", InvitationCode);
-    LogOut("Server Startup/INFO", 0, "Listening on http://localhost:%d...", ListenPort);
+	LogOut("Server Startup/INFO", 0, "Set queue of listening \033[32msuccessfully\033[0m.");
+	LogOut("Server Startup/INFO", 0, "Your Invitation Code is \033[1m\033[36m%s\033[0m.", InvitationCode);
+    LogOut("Server Startup/INFO", 0, "Listening on \033[4mhttp://localhost:%d\033[0m...", ListenPort);
     pthread_mutex_init(&thread_lock, NULL);
     pthread_mutex_init(&thread_lock_Sync, NULL);
     pthread_t ThreadId;
@@ -1213,7 +1250,7 @@ int main() {
 	system("mkdir ChatMessages");
 	while(1) {
 		ClientSocket = accept(ListenSocket, NULL, NULL);
-	    if(ClientSocket == INVALID_SOCKET) {
+	    if(ClientSocket == INVALID_SOCKET || ClientSocket == 0) {
 	        //closesocket(ListenSocket);
 #ifdef _WIN32
 			WSACleanup();
