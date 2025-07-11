@@ -185,8 +185,8 @@ typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     PUINT puColumns;
     int   *piColFmt;
 } NEWLVTILEINFO, *PNEWLVTILEINFO;
-char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16], AliveInLast5Minute = 0, InFocus;
-int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UseDarkMode = 0;
+char Name[512], InvitationCode[256], ReceiveData[32767], Message[32767], IP[256], Port[8], JsonConfigFile[32767 * 16], AliveInLast5Minute = 0, InFocus, ThisDirectory[32767], LastThisDirectory[32767];
+int ChatRoomsCount, ChatRoom_LastChoose = -1, PeopleCount, UseDarkMode = 0, ShowToast = FALSE;
 unsigned int UsersCount = 0;
 HWND hWndMain, hWndNotify;
 HIMAGELIST hImageList;
@@ -209,6 +209,8 @@ HHOOK hFocus;
 SOCKET sockfd;
 int FileHandleCount = 0, MemoryPointerCount = 0;
 FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict__ _Mode, const char* File, int Line) {
+	getcwd(LastThisDirectory);
+	chdir(ThisDirectory);
 	FILE* lpFile = fopen(_Filename, _Mode);
 	if(lpFile != NULL) {
 		errno = 0;
@@ -219,6 +221,7 @@ FILE *__cdecl fopen2(const char * __restrict__ _Filename,const char * __restrict
 		printf("[File Manager/ERROR] Opened File failed! (OF: %s, Mode: %s, File: %s, Line: %d, File Handle Count: %d)\n", _Filename, _Mode, File, Line, FileHandleCount);
 		printf("[File Manager/ERROR] Code: %s(%d)\n", strerror(errno), errno);
 	}
+	chdir(LastThisDirectory);
 	return lpFile;
 }
 int __cdecl fclose2(FILE *_File, const char* File, int Line) {
@@ -251,6 +254,7 @@ void __cdecl free2(void *_Memory, const char* File, int Line) {
 #define free(a) free2(a, __FILE__, __LINE__)
 #include "..\Json.h"
 BOOL ShowToastMessage(DWORD dwIcon, const char *Title, const char *Details, BOOL bAlwaysShow) {
+	if(ShowToast == 0) return TRUE;
 	if(bAlwaysShow == 0 && InFocus == 1) return TRUE;
 	NOTIFYICONDATAA nid2;
 	memset(&nid2, 0, sizeof(nid2));
@@ -756,6 +760,10 @@ void* RecvMessageThread(void* lParam) {
 				free(lvi.pszText);
 				break;
 			}
+			case '\xFF': {//All chat records have been sent
+				ShowToast = TRUE;
+				break;
+			}
 		}
 		AliveInLast5Minute = 1;
 		if(IsDlgButtonChecked(hWndMain, 10) == BST_CHECKED) {
@@ -889,6 +897,7 @@ void *DownloadingFileThread(void *lParam) {
 	char *FileName = (char*)calloc(32767, sizeof(char)), *DownloadPath = (char*)calloc(32767, sizeof(char)), *Details = (char*)calloc(32767, sizeof(char)), *ReadData = (char*)calloc(32767, sizeof(char)), ErrMsg[32767], NameLength, iReceive;
 	strcpy(FileName, (char*)GetPropA(hWndOwner, "FileName"));
 	free(GetPropA(hWndOwner, "FileName"));
+	SetPropA(hWndOwner, "FileName", NULL);
 	strcpy(DownloadPath, (char*)GetPropA(hWndOwner, "DownloadPath"));
 	free(GetPropA(hWndOwner, "DownloadPath"));
 	printf("DownloadPath: %s\nFileName: %s\n", DownloadPath, FileName);
@@ -1755,6 +1764,9 @@ LRESULT CALLBACK FileViewProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lPa
         }
 		case WM_DESTROY: {
 			EnableWindow(GetPropA(hWnd, "hWndOwner"), TRUE);
+			if(GetPropA(hWnd, "FileName") != NULL) {
+				free(GetPropA(hWnd, "FileName"));
+			}
 			break;
 		}
 		default: return DefWindowProc(hWnd, Message, wParam, lParam);
@@ -1891,6 +1903,10 @@ DEFINE_GUID2(IID_IOleObject__,
 	return 0;
 }*/
 int main() {
+	GetModuleFileName(NULL, ThisDirectory, 32767);
+	int LastSpliter = strlen(ThisDirectory) - 1;
+	while(ThisDirectory[LastSpliter] != '\\') LastSpliter -= 1;
+	ThisDirectory[LastSpliter] = '\0'; 
 	pthread_mutex_init(&Lock, NULL);
 	INITCOMMONCONTROLSEX icex;
 	icex.dwSize = sizeof(icex);
