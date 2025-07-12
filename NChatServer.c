@@ -33,7 +33,7 @@ typedef long long		SOCKET;
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
 char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\xA";
+const char *VersionData = "\x1\x2\xB";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -856,11 +856,28 @@ void* SocketHandler(void* lParam) {
 						FILE *lpFile = fopen(FileName, "rb");
 						if(lpFile != NULL) {
 							fclose(lpFile);
-							int FileNameLength = strlen(FileName), id = 0;
-							while((lpFile = fopen(FileName, "rb")) != NULL) {
-								fclose(lpFile);
-								id += 1;
-								sprintf(FileName + FileNameLength, " (%d)", id);
+							int i = strlen(FileName) - 1;
+							while(i >= 0 && FileName[i] != '.') i -= 1;
+							if(i == -1) {
+								int FileNameLength = strlen(FileName), id = 0;
+								while((lpFile = fopen(FileName, "rb")) != NULL) {
+									fclose(lpFile);
+									id += 1;
+									sprintf(FileName + FileNameLength, " (%d)", id);
+								}
+							}
+							else {
+								char *FileSuffix = (char*)calloc(256, sizeof(char));
+								strcpy(FileSuffix, FileName + i);
+								FileName[i] = '\0';
+								int FileNameLength = strlen(FileName), id = 1;
+								sprintf(FileName + FileNameLength, " (%d)%s", id, FileSuffix);
+								while((lpFile = fopen(FileName, "rb")) != NULL) {
+									fclose(lpFile);
+									id += 1;
+									sprintf(FileName + FileNameLength, " (%d)%s", id, FileSuffix);
+								}
+								free(FileSuffix);
 							}
 						}
 						lpFile = fopen(FileName, "wb");
