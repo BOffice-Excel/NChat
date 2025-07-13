@@ -927,8 +927,10 @@ void *DownloadingFileThread(void *lParam) {
 	strcpy(DownloadPath, (char*)GetPropA(hWndOwner, "DownloadPath"));
 	free(GetPropA(hWndOwner, "DownloadPath"));
 	printf("DownloadPath: %s\nFileName: %s\n", DownloadPath, FileName);
-	sprintf(Details, "File '%s' is downloading...", FileName);
-	ShowToastMessage(NIIF_INFO, "File Downloading is In Progress", Details, 1);
+	if(GetPropA(hWndOwner, "HideToast") == NULL) {
+		sprintf(Details, "File '%s' is downloading...", FileName);
+		ShowToastMessage(NIIF_INFO, "File Downloading is In Progress", Details, 1);
+	}
 	
 	struct addrinfo hints, *res;
 	int status;
@@ -1013,8 +1015,10 @@ void *DownloadingFileThread(void *lParam) {
 		fwrite(ReadData, sizeof(char), iResult, lpFile);
 	}
 	fclose(lpFile);
-	sprintf(Details, "File '%s' was downloaded.", FileName);
-	ShowToastMessage(NIIF_INFO, "File Downloaded successfully", Details, 1);
+	if(GetPropA(hWndOwner, "HideToast") == NULL) {
+		sprintf(Details, "File '%s' was downloaded.", FileName);
+		ShowToastMessage(NIIF_INFO, "File Downloaded successfully", Details, 1);
+	}
     free(FileName);
     free(Details);
 	free(ReadData);
@@ -1024,6 +1028,133 @@ void *DownloadingFileThread(void *lParam) {
 		((DOAFTERDLFUNC)GetPropA(hWndOwner, "DoAfter"))(DownloadPath);
 	}
     free(DownloadPath);
+	return NULL;
+}
+void *UploadPicFromClipboard(void *lParam) {
+	HBITMAP hBitmap;
+	if(OpenClipboard(NULL) == TRUE) {
+		if (IsClipboardFormatAvailable(CF_BITMAP) == TRUE) {
+			hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
+			if (hBitmap == NULL) {
+				MessageBox(NULL, "Error: Get bitmap from clipboard failed!", "Error", MB_ICONWARNING);
+				CloseClipboard();
+				return NULL;
+			}
+		}
+		else {
+			MessageBox(NULL, "Error: There is no bitmap in the clipboard!", "Error", MB_ICONWARNING);
+			CloseClipboard();
+			return NULL;
+		}
+	}
+	else {
+		MessageBox(NULL, "Error: Open clipboard failed!", "Error", MB_ICONWARNING);
+		return NULL;
+	}
+	BITMAP bm;
+    if(GetObjectA(hBitmap, sizeof(bm), &bm) == FALSE) {
+    	MessageBox(NULL, "Error: Get Bitmap information failed!", "Error", MB_ICONWARNING);
+        return NULL;
+    }
+    int WidthBytes = ((bm.bmWidth * 24 + 31) / 32) * 4, BitsSize = WidthBytes * bm.bmHeight;
+    BYTE* lpBits = (LPBYTE)calloc(BitsSize, sizeof(char));
+    HDC hDC = GetDC(NULL), hdc = CreateCompatibleDC(hDC);
+	BITMAPINFOHEADER bmih;
+	memset(&bmih, 0, sizeof(bmih));
+	bmih.biSize = sizeof(BITMAPINFOHEADER);
+    bmih.biWidth = bm.bmWidth;
+    bmih.biHeight = bm.bmHeight;
+    bmih.biPlanes = 1;
+    bmih.biBitCount = 24;
+    bmih.biCompression = BI_RGB;
+	SelectObject(hdc, hBitmap);
+    GetDIBits(hdc, hBitmap, 0, bm.bmHeight, lpBits, (BITMAPINFO*)&bmih, DIB_RGB_COLORS);
+    ReleaseDC(NULL, hDC);
+    DeleteDC(hdc);
+	BITMAPFILEHEADER bmfh;
+	memset(&bmfh, 0, sizeof(bmfh));
+	bmfh.bfType = 0x4D42;
+	bmfh.bfOffBits = sizeof(bmfh) + sizeof(bmih);
+	bmfh.bfSize = bmfh.bfOffBits + BitsSize;
+	
+	_off64_t FileSize = sizeof(bmfh) + sizeof(bmih) + BitsSize;
+	char *Details = (char*)calloc(32767, sizeof(char)), ErrMsg[32767], NameLength, iReceive, *FileName = (char*)calloc(256, sizeof(char));
+	struct addrinfo hints, *res;
+	int status;
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	if ((status = getaddrinfo(IP, Port, &hints, &res)) != 0) {
+	    sprintf(ErrMsg, "Getaddrinfo Failed: %s(%d)", gai_strerror(status), status);
+	    MessageBox(hWndMain, ErrMsg, "Uploaded picture failed!", MB_ICONERROR);
+	    free(FileName);
+	    free(Details);
+	    free(lpBits);
+	    return FALSE;
+	}
+	SOCKET sockfd = socket(res -> ai_family, res -> ai_socktype, res -> ai_protocol);
+	if(sockfd == INVALID_SOCKET) {
+	    MessageBox(hWndMain, "Socket Failed!", "Uploaded picture failed!", MB_ICONERROR);
+	    free(FileName);
+	    free(Details);
+	    free(lpBits);
+        return FALSE;
+    }
+    int iResult = connect(sockfd, res->ai_addr, res->ai_addrlen), iLen = strlen(Name);
+    if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Connect Failed!", "Uploaded picture failed!", MB_ICONERROR);
+		closesocket(sockfd);
+	    free(FileName);
+	    free(Details);
+	    free(lpBits);
+    	return FALSE;
+	}
+    iResult = send(sockfd, "\xC", 1, 0);
+	if(iResult == SOCKET_ERROR) {
+	    MessageBox(hWndMain, "Send Failed!", "Uploaded picture failed!", MB_ICONERROR);
+		closesocket(sockfd);
+	    free(FileName);
+	    free(Details);
+	    free(lpBits);
+		return FALSE;
+    }
+    NameLength = strlen(Name);
+    send(sockfd, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd, Name, NameLength, 0);
+    recv(sockfd, &iReceive, sizeof(iReceive), 0);
+    if(iReceive != 0) {
+    	memset(Details, 0, 32767);
+    	sprintf(Details, "Error Code: %d", iReceive);
+    	recv(sockfd, Details + strlen(Details), 32767, 0);
+    	MessageBox(hWndMain, Details, "Uploaded picture failed!", MB_ICONWARNING);
+    	closesocket(sockfd);
+	    free(FileName);
+	    free(Details);
+	    free(lpBits);
+    	return NULL;
+	}
+	sprintf(FileName, "%lld.bmp", time(NULL));
+	NameLength = strlen(FileName);
+    send(sockfd, (const char*)&NameLength, sizeof(NameLength), 0);
+    send(sockfd, FileName, NameLength, 0);
+    recv(sockfd, &iReceive, sizeof(iReceive), 0);
+    if(iReceive != 0) {
+    	sprintf(Details, "Picture uploaded failed!(Error Code: %d)", iReceive);
+    	MessageBox(hWndMain, Details, "Uploaded picture failed!", MB_ICONWARNING);
+    	closesocket(sockfd);
+    	free(FileName);
+    	free(Details);
+    	free(lpBits);
+    	return NULL;
+	}
+	send(sockfd, (const char*)&FileSize, sizeof(FileSize), 0);
+	send(sockfd, (const char*)&bmfh, sizeof(bmfh), 0);
+	send(sockfd, (const char*)&bmih, sizeof(bmih), 0);
+	send(sockfd, (const char*)lpBits, BitsSize, 0);
+	free(FileName);
+	free(Details);
+	free(lpBits);
+	closesocket(sockfd);
 	return NULL;
 }
 BOOL Signin(const char *IP, const char *Port, const char *Name, const char *InvitationCode) {
@@ -1539,24 +1670,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 					break;
 				}
 				case 102: {
-					if(OpenClipboard(NULL) == TRUE) {
-						if (IsClipboardFormatAvailable(CF_BITMAP) == TRUE) {
-							HBITMAP hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
-							if (hBitmap == NULL) {
-								
-							}
-							else {
-								MessageBox(hWnd, "Error: Get bitmap from clipboard failed!", "Error", MB_ICONWARNING);
-							}
-						}
-						else {
-							MessageBox(hWnd, "Error: There is no bitmap in the clipboard!", "Error", MB_ICONWARNING);
-						}
-						CloseClipboard();
-					}
-					else {
-						MessageBox(hWnd, "Error: Open clipboard failed!", "Error", MB_ICONWARNING);
-					}
+					pthread_t ptid_t;
+					pthread_create(&ptid_t, NULL, UploadPicFromClipboard, NULL);
 					break;
 				}
 			}
@@ -1680,7 +1795,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 									strcpy(DL, lvi.pszText + 10);
 									SetPropA(hWnd, "DownloadPath", FileName);
 									SetPropA(hWnd, "FileName", DL);
-									SetPropA(hWnd, "Toast", (HANDLE)1);
+									SetPropA(hWnd, "HideToast", (HANDLE)1);
 									SetPropA(hWnd, "DoAfter", ShowPicture);
 									pthread_t ptid_t;
 									pthread_create(&ptid_t, NULL, DownloadingFileThread, (void*)hWnd);

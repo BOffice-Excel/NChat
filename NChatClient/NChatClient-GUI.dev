@@ -34,19 +34,19 @@ UnitCount=1
 [VersionInfo]
 Major=1
 Minor=2
-Release=11
-Build=461
+Release=12
+Build=483
 LanguageID=1033
 CharsetID=1252
 CompanyName=NotMyFaults
-FileVersion=1.2.11.461
+FileVersion=1.2.12.483
 FileDescription=NChat Client
 InternalName=NChatClient
 LegalCopyright=
 LegalTrademarks=
 OriginalFilename=NChatClient-GUI.exe
 ProductName=NChat
-ProductVersion=1.2.11.461
+ProductVersion=1.2.12.483
 AutoIncBuildNr=1
 SyncProduct=1
 
