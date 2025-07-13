@@ -177,7 +177,8 @@ typedef struct IOleClientSite2 {
 enum MESSAGETYPE {
 	MT_PLAINTEXT = 0,
 	MT_FILE,
-	MT_SYSTEMNOTIFICATION
+	MT_SYSTEMNOTIFICATION,
+	MT_PICTURE
 };
 typedef struct tagNEWLVTILEINFO {//From Microsoft Learn
     UINT  cbSize;
@@ -542,15 +543,39 @@ void* RecvMessageThread(void* lParam) {
 					i += 2;
 				}
 				lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
-				lvi.lParam = MT_FILE;
+				int j = strlen(FileName) - 1;
+				while(j >= 0 && FileName[j] != '.') j -= 1;
+				if(j != -1 && (strcmp(FileName + j, ".bmp") == 0 || strcmp(FileName + j, ".png") == 0 || strcmp(FileName + j, ".jpg") == 0 || strcmp(FileName + j, ".jpeg") == 0 || strcmp(FileName + j, ".gif") == 0 || strcmp(FileName + j, ".svg") == 0 || strcmp(FileName + j, ".tga") == 0 || strcmp(FileName + j, ".tif") == 0 || strcmp(FileName + j, ".tiff") == 0 || strcmp(FileName + j, ".webp") == 0 || strcmp(FileName + j, ".cr2") == 0 || strcmp(FileName + j, ".nef") == 0 || strcmp(FileName + j, ".apng") == 0)) {
+					lvi.lParam = MT_PICTURE;
+				}
+				else lvi.lParam = MT_FILE;
 				lvi.iSubItem = 0;
 				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
 				lvi.iImage = i;
 				lvi.pszText = (char*)calloc(512, sizeof(char));
-				sprintf(lvi.pszText, "[File] %s", FileName);
+				switch(lvi.lParam) {
+					case MT_FILE: {
+						sprintf(lvi.pszText, "[File] %s", FileName);
+						break;
+					}
+					case MT_PICTURE: {
+						sprintf(lvi.pszText, "[Picture] %s", FileName);
+						break;
+					}
+				}
 				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
 				struct tm* TimeStruct = localtime(&Time);
-				sprintf(lvi.pszText, "%s sent a file (", UserName);
+				memset(lvi.pszText, 0, 512);
+				switch(lvi.lParam) {
+					case MT_FILE: {
+						sprintf(lvi.pszText, "%s sent a file (", UserName);
+						break;
+					} 
+					case MT_PICTURE: {
+						sprintf(lvi.pszText, "%s sent a picture (", UserName);
+						break;
+					} 
+				}
 				strftime(lvi.pszText + strlen(lvi.pszText), 1145, "%Y/%m/%d %H:%M:%S", TimeStruct);
 				lvi.pszText[strlen(lvi.pszText)] = ')';
 				if(IsDlgButtonChecked(hWndMain, 11) == BST_CHECKED) ShowToastMessage(NIIF_NONE, "New file", lvi.pszText, 0);
@@ -991,10 +1016,14 @@ void *DownloadingFileThread(void *lParam) {
 	sprintf(Details, "File '%s' was downloaded.", FileName);
 	ShowToastMessage(NIIF_INFO, "File Downloaded successfully", Details, 1);
     free(FileName);
-    free(DownloadPath);
     free(Details);
 	free(ReadData);
 	closesocket(sockfd2);
+	if(GetPropA(hWndOwner, "DoAfter") != NULL) {
+		typedef void (*DOAFTERDLFUNC)(const char*);
+		((DOAFTERDLFUNC)GetPropA(hWndOwner, "DoAfter"))(DownloadPath);
+	}
+    free(DownloadPath);
 	return NULL;
 }
 BOOL Signin(const char *IP, const char *Port, const char *Name, const char *InvitationCode) {
@@ -1051,6 +1080,17 @@ BOOL Signin(const char *IP, const char *Port, const char *Name, const char *Invi
 	}
 	return TRUE;
 }
+void ShowPicture(const char* Path) {
+	char *Command = (char*)calloc(32767, sizeof(char));
+	sprintf(Command, "mshta.exe %s", Path);
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+	memset(&si, 0, sizeof(si));
+	memset(&pi, 0, sizeof(pi));
+	CreateProcessA(NULL, Command, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+	free(Command);
+	return ;
+} 
 LRESULT CALLBACK LoginWndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) {
 	switch(Message) {
 		case WM_CREATE: {
@@ -1353,7 +1393,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			//CreateWindowExA(0, "BUTTON", "Always show notifications",
 			//	WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_AUTOCHECKBOX, 0, 0, 0, 0, hWnd, (HMENU)11, NULL, NULL);
 			CreateWindowExA(0, "BUTTON", "Send A File",
-				WS_CHILD | WS_TABSTOP | WS_VISIBLE, 0, 0, 0, 0, hWnd, (HMENU)12, NULL, NULL);
+				WS_CHILD | WS_TABSTOP | WS_VISIBLE | BS_SPLITBUTTON, 0, 0, 0, 0, hWnd, (HMENU)12, NULL, NULL);
 			SendDlgItemMessage(hWnd, 3, EM_SETLIMITTEXT, 32766, 0);
 			CheckDlgButton(hWnd, 10, BST_CHECKED);
 			//CheckDlgButton(hWnd, 11, BST_CHECKED);
@@ -1397,7 +1437,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 			SetWindowPos(GetDlgItem(hWnd, 9), NULL, (Rect.right - 110) * 0.7 + 40, Rect.bottom - 50, (Rect.right - 110) * 0.1, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 10), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 130, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
 			SetWindowPos(GetDlgItem(hWnd, 11), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 160, (Rect.right - 110) * 0.3, 30, SWP_NOZORDER);
-			SetWindowPos(GetDlgItem(hWnd, 12), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 190, (Rect.right - 110) * 0.1, 30, SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, 12), NULL, (Rect.right - 110) * 0.7 + 40, (Rect.bottom - 130) * 0.6 + 190, (Rect.right - 110) * 0.15, 30, SWP_NOZORDER);
 			LVTILEVIEWINFO tileViewInfo;
             tileViewInfo.cbSize = sizeof(LVTILEVIEWINFO);
             tileViewInfo.dwFlags = LVTVIF_FIXEDSIZE;
@@ -1494,6 +1534,31 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 					free(FilePath);
 					break;
 				}
+				case 101: {
+					SendMessage(hWnd, WM_COMMAND, 12, 0);
+					break;
+				}
+				case 102: {
+					if(OpenClipboard(NULL) == TRUE) {
+						if (IsClipboardFormatAvailable(CF_BITMAP) == TRUE) {
+							HBITMAP hBitmap = (HBITMAP)GetClipboardData(CF_BITMAP);
+							if (hBitmap == NULL) {
+								
+							}
+							else {
+								MessageBox(hWnd, "Error: Get bitmap from clipboard failed!", "Error", MB_ICONWARNING);
+							}
+						}
+						else {
+							MessageBox(hWnd, "Error: There is no bitmap in the clipboard!", "Error", MB_ICONWARNING);
+						}
+						CloseClipboard();
+					}
+					else {
+						MessageBox(hWnd, "Error: Open clipboard failed!", "Error", MB_ICONWARNING);
+					}
+					break;
+				}
 			}
 			break;
 		}
@@ -1524,6 +1589,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 		}
 	    case WM_NOTIFY: {
 			switch(((LPNMHDR)lParam) -> code) {
+				case BCN_DROPDOWN: {
+					switch(((LPNMHDR)lParam) -> idFrom) {
+						case 12: {
+							POINT pt;
+							GetCursorPos(&pt);
+							HMENU hMenu = CreatePopupMenu();
+							AppendMenu(hMenu, MF_STRING, 101, "File");
+							AppendMenu(hMenu, MF_STRING, 102, "Picture (From Clipboard)");
+							TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, hWnd, NULL);
+							DestroyMenu(hMenu);
+							break;
+						}
+					}
+					break;
+				}
 				case LVN_ITEMACTIVATE: {
 					LPNMITEMACTIVATE lpnmia = (LPNMITEMACTIVATE)lParam;
 					switch(lpnmia -> hdr.idFrom) {
@@ -1592,6 +1672,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT Message, WPARAM wParam, LPARAM lParam) 
 									SetPropA(hFileWnd, "FileName", lvi.pszText + 7);
 									SetPropA(hFileWnd, "hWndOwner", hWnd);
 									SendMessage(hFileWnd, WM_TIMER, 1, 0);
+									break;
+								}
+								case MT_PICTURE: {
+									char *FileName = (char*)calloc(32767, sizeof(char)), *DL = (char*)calloc(32767, sizeof(char));
+									sprintf(FileName, "%s\\ChatPictures\\%s", ThisDirectory, lvi.pszText + 10);
+									strcpy(DL, lvi.pszText + 10);
+									SetPropA(hWnd, "DownloadPath", FileName);
+									SetPropA(hWnd, "FileName", DL);
+									SetPropA(hWnd, "Toast", (HANDLE)1);
+									SetPropA(hWnd, "DoAfter", ShowPicture);
+									pthread_t ptid_t;
+									pthread_create(&ptid_t, NULL, DownloadingFileThread, (void*)hWnd);
 									break;
 								}
 							}
@@ -1913,6 +2005,8 @@ DEFINE_GUID2(IID_IOleObject__,
 	return 0;
 }*/
 int main() {
+	CreateDirectory("ChatMessages", NULL);
+	CreateDirectory("ChatPictures", NULL);
 	GetModuleFileName(NULL, ThisDirectory, 32767);
 	int LastSpliter = strlen(ThisDirectory) - 1;
 	while(ThisDirectory[LastSpliter] != '\\') LastSpliter -= 1;
