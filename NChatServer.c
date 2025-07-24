@@ -1,4 +1,5 @@
 #define _FILE_OFFSET_BITS 64
+#include "Mods/NChatServerModAPI.h"
 #include <pthread.h>
 //#include <dlfcn.h>
 #ifdef _WIN32
@@ -28,21 +29,110 @@ typedef long long		SOCKET;
 #include <time.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <errno.h>
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
+MODINTERFACE ModInterface;
+typedef void (*MODINITFUNC)(LPMODINTERFACE, char*);
+char *ModsName[32767];
+char PathToTrieConfigs[256 + 32];
+typedef struct tagTRIETWIGS{
+	int size;
+	char *Value;
+	tagTRIETWIGS *Next[132];
+}TRIETWIGS, *LPTRIETWIGS;
+LPTRIETWIGS lpTrieRoot = NULL;
+int GetTrieValue(const char* Key, char* Value, LPTRIETWIGS lpRoot) {
+	int i;
+	LPTRIETWIGS lpTrieThis = lpRoot;
+	for(i = 0; i < strlen(Key); i += 1) {
+		lpTrieThis = lpTrieThis -> Next[Key[i]];
+		if(lpTrieThis == NULL) return -1;
+	}
+	if(lpTrieThis -> Value == NULL) return -2;
+	strcpy(Value, lpTrieThis -> Value);
+	return 0;
+	/*if(lpRoot == NULL) return -1;
+	if(Key[0] == '\0') {
+		if(lpRoot -> Value != NULL) {
+			strcpy(Value, lpRoot -> Value);
+			return 0;
+		}
+		return -1;
+	}
+	return GetTrieValue(Key + 1, Value, lpRoot -> Next[Key[0]]);*/
+}
+void SaveTrieConfigs(FILE* lpFile, LPTRIETWIGS lpRoot, int deep) {
+	if(lpRoot == NULL) return ;
+	if(lpRoot -> Value != NULL) {
+		fwrite(&deep, sizeof(char), 1, lpFile);
+		fwrite(PathToTrieConfigs, sizeof(char), deep, lpFile);
+		int DataLength = strlen(lpRoot -> Value);
+		fwrite(&DataLength, sizeof(DataLength), 1, lpFile);
+		fwrite(lpRoot -> Value, sizeof(char), DataLength, lpFile);
+	}
+	int i;
+	for(i = 0; i <= 128; i += 1) {
+		if(lpRoot -> Next[i] != NULL) {
+			PathToTrieConfigs[deep] = i;
+			SaveTrieConfigs(lpFile, lpRoot -> Next[i], deep + 1);
+		}
+	}
+	return ;
+}
+void SetTrieValue(const char* Key, const char* Value, LPTRIETWIGS lpRoot) {
+	int i;
+	LPTRIETWIGS lpTrieThis = lpRoot;
+	for(i = 0; i < strlen(Key); i += 1) {
+		if(lpTrieThis -> Next[Key[i]] == NULL) lpTrieThis -> Next[Key[i]] = (LPTRIETWIGS)calloc(1, sizeof(TRIETWIGS));
+		lpTrieThis = lpTrieThis -> Next[Key[i]];
+	}
+	if(lpTrieThis -> Value == NULL) {
+		lpTrieThis -> Value = (char*)calloc(strlen(Value) + 5, sizeof(char));
+		lpTrieThis -> size = strlen(Value);
+	}
+	if(lpTrieThis -> size < strlen(Value)) {
+		free(lpTrieThis -> Value);
+		lpTrieThis -> Value = (char*)calloc(strlen(Value) + 5, sizeof(char));
+		lpTrieThis -> size = strlen(Value);
+	}
+	strcpy(lpTrieThis -> Value, Value);
+	return ;
+	/*if(Key[0] == '\0') {
+		if(lpRoot -> Value == NULL) {
+			lpRoot -> Value = (char*)calloc(strlen(Value) + 5, sizeof(char));
+			lpRoot -> size = strlen(Value) + 5;
+		}
+		else if(strlen(Value) > lpRoot -> size) {
+			free(lpRoot -> Value);
+			lpRoot -> Value = (char*)calloc(strlen(Value) + 5, sizeof(char));
+			lpRoot -> size = strlen(Value) + 5;
+		}
+		strcpy(lpRoot -> Value, Value);
+		return ;
+	}
+	if(lpRoot -> Next[Key[0]] == NULL) lpRoot -> Next[Key[0]] = (LPTRIETWIGS)calloc(1, sizeof(TRIETWIGS));
+	SetTrieValue(Key + 1, Value, lpRoot -> Next[Key[0]]);*/
+	return ;
+}
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
-char LogBuf[1145], LogBuf2[1145], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x2\xC";
+char LogBuf[1145], LogBuf2[1145141910], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
+const char *VersionData = "\x1\x3\x0";
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
+	MSGLISTENERFUNC VirtualUserMsgHandler;
 	struct ULIST *Next, *Last;
 }*UL_Head, *UL_Last;
 unsigned int UsersCount = 0, UserLimit;
 unsigned long long MessagesCount = 0;
 SOCKET ListenSocket;
 pthread_mutex_t thread_lock, thread_lock_Sync;
+#ifdef _WIN32
+HMODULE hMods[32767];
+#else
+#endif
 int send_lock(SOCKET s, const char *buf, int len, int flags) {
 	pthread_mutex_lock(&thread_lock);
 	int iResult = send(s, buf, len, flags);
@@ -83,6 +173,338 @@ void LogOut(const char* Poster, int NoNewLine, const char* Format, ...) {
     if(NoNewLine == 0) printf("\n");
 	va_end(v);
 	return ;
+}
+void vLogOut(const char* Poster, int NoNewLine, const char* Format, va_list v) {
+	time_t CurrentTime;
+	time(&CurrentTime);
+	struct tm* localTime;
+    localTime = localtime(&CurrentTime);
+    strftime(LogBuf, sizeof(LogBuf), "%Y-%m-%d %H:%M:%S", localTime);
+    vsprintf(LogBuf2, Format, v);
+    printf("\033[34m[\033[33m%s\033[34m]\033[0m \033[34m[\033[0m", LogBuf);
+    int i;
+    for(i = 0; i < strlen(Poster); i += 1) {
+    	if(Poster[i] == '/') {
+    		if(strcmp(Poster + i + 1, "INFO") == 0) {
+    			printf("/\033[32mINFO\033[0m");
+			}
+    		else if(strcmp(Poster + i + 1, "WARN") == 0) {
+    			printf("/\033[33mWARN\033[0m");
+			}
+    		else if(strcmp(Poster + i + 1, "ERROR") == 0) {
+    			printf("/\033[31mERROR\033[0m");
+			}
+			else {
+				printf("%s", Poster + i);
+			}
+			break;
+		}
+		printf("%c", Poster[i]);
+	}
+	printf("\033[34m]\033[0m: %s", LogBuf2);
+    if(NoNewLine == 0) printf("\n");
+	return ;
+}
+void ModLogOut_API(const char* ModuleName, const char* Type, int NoNewLine, const char* Format, ...) {
+	char Poster[32767];
+	va_list v;
+	va_start(v, Format);
+	sprintf(Poster, "%s/%s", ModuleName, Type);
+	vLogOut(Poster, NoNewLine, Format, v);
+	va_end(v);
+	return ;
+}
+int ModGetUsersList_API(char **Users, int iBufferMax) {
+	if(Users != NULL) {
+		int i = 0;
+		struct ULIST *This = UL_Head -> Next;
+		while(This != NULL) {
+			if(i >= iBufferMax) break;
+			strcpy(Users[i], This -> UserName);
+			This = This -> Next;
+			i += 1;
+		}
+	}
+	return UsersCount;
+}
+HUSER ModCreateUser_API(const char* ModuleName, const char* UserName, MSGLISTENERFUNC MsgListener) {
+	if(UsersCount >= UserLimit) return NULL;
+	struct ULIST *This = UL_Head -> Next;
+	int HasSame = 0;
+	while(This != NULL) {
+		if(strcmp(This -> UserName, UserName) == 0) {
+			HasSame = 1;
+			break;
+		}
+		This = This -> Next;
+	}
+	if(HasSame == 1) return NULL;
+	struct ULIST *NewUser = (struct ULIST*)calloc(1, sizeof(ULIST));
+	strcpy(NewUser -> UserName, UserName);
+	NewUser -> VirtualUserMsgHandler = MsgListener;
+	time_t Time = time(NULL);
+	unsigned char length = strlen(UserName);
+	This = UL_Head -> Next;
+	while(This != NULL) {
+		if(This -> UserBindClient != 0) {
+			send(This -> UserBindClient, "\xA", 1, 0);
+			send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+			send(This -> UserBindClient, (const char*)&length, 1, 0);
+			send(This -> UserBindClient, UserName, length, 0);
+		}
+		else {
+			This -> VirtualUserMsgHandler(This -> UserName, UserName, 1, NULL, Time);
+		}
+		This = This -> Next;
+	}
+	NewUser -> Last = UL_Last;
+	UL_Last -> Next = NewUser;
+	UL_Last = NewUser;
+	UsersCount += 1;
+	pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
+	FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+	FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+	if(lpFile != NULL) {
+		fwrite("\xA", sizeof(char), 1, lpFile);
+		fwrite(&Time, sizeof(Time), 1, lpFile);
+		fwrite(&length, sizeof(char), 1, lpFile);
+		fwrite(UserName, sizeof(char), length, lpFile);
+		fclose(lpFile);
+	}
+	pthread_mutex_unlock(&thread_lock_Sync);
+	LogOut("Mod API/INFO", 0, "%s(%s) joined the chat room", UserName, ModuleName);
+	return NewUser;
+}
+void ModCloseUser_API(const char* ModuleName, HUSER hUser) {
+	if(hUser == NULL || ModuleName == NULL) return;
+	struct ULIST *This = (struct ULIST*)hUser, *lpEnum;
+	This -> Last -> Next = This -> Next;
+	if(This -> Next != NULL) This -> Next -> Last = This -> Last;
+	else UL_Last = This -> Last;
+	char SendMsg[4];
+	SendMsg[0] = '\xB';
+	SendMsg[1] = strlen(This -> UserName);
+	time_t Time;
+	Time = time(NULL);
+	lpEnum = UL_Head -> Next;
+	while(lpEnum != NULL) {
+		if(lpEnum -> UserBindClient != 0) {
+			send(lpEnum -> UserBindClient, SendMsg, 1, 0);
+			send(lpEnum -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+			send(lpEnum -> UserBindClient, SendMsg + 1, 1, 0);
+			send(lpEnum -> UserBindClient, This -> UserName, SendMsg[1], 0);
+		}
+		else lpEnum -> VirtualUserMsgHandler(lpEnum -> UserName, This -> UserName, 2, NULL, Time);
+		lpEnum = lpEnum -> Next;
+	}
+	LogOut("Mod API/INFO", 0, "%s left the chat room(%s)", This -> UserName, ModuleName);
+	pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
+	FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+	FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+	if(lpFile != NULL) {
+		fwrite(SendMsg, sizeof(char), 1, lpFile);
+		fwrite(&Time, sizeof(Time), 1, lpFile);
+		fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
+		fwrite(This -> UserName, sizeof(char), SendMsg[1], lpFile);
+		fclose(lpFile);
+	}
+	pthread_mutex_unlock(&thread_lock_Sync);
+	free(This);
+	UsersCount -= 1;
+	return ;
+}
+void ModFakeUserSpeak_API(HUSER hUser, int NeedCallBack, const char *Message) {
+	if(hUser == NULL || Message == NULL || (Message != NULL && strcmp(Message, "") == 0)) return;
+	struct ULIST *This = UL_Head -> Next, *uUser = (struct ULIST*)hUser;
+	time_t Time;
+	Time = time(NULL);
+	unsigned char Len = strlen(uUser -> UserName);
+	int iLength = strlen(Message);
+	while(This != NULL) {
+		if(NeedCallBack == 0 && strcmp(This -> UserName, uUser -> UserName) == 0) {
+			This = This -> Next;
+			continue;
+		}
+		if(This -> UserBindClient != 0) {
+			send(This -> UserBindClient, "\xF", 1, 0); 
+			send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+			send(This -> UserBindClient, (const char*)&Len, 1, 0);
+			send(This -> UserBindClient, uUser -> UserName, Len, 0);
+			send(This -> UserBindClient, (const char*)&iLength, sizeof(iLength), 0);
+			send(This -> UserBindClient, Message, iLength, 0);
+		}
+		else This -> VirtualUserMsgHandler(This -> UserName, uUser -> UserName, 0, Message, Time);
+		This = This -> Next;
+	}
+	pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32
+	FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+	FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+	if(lpFile != NULL) {
+		fwrite("\xF", sizeof(char), 1, lpFile);
+		fwrite(&Time, sizeof(Time), 1, lpFile);
+		fwrite(&Len, sizeof(char), 1, lpFile);
+		fwrite(uUser -> UserName, sizeof(char), Len, lpFile);
+		fwrite(&iLength, sizeof(iLength), 1, lpFile);
+		fwrite(Message, sizeof(char), iLength, lpFile);
+		fclose(lpFile);
+	}
+	pthread_mutex_unlock(&thread_lock_Sync);
+	char FileName[32767];
+#ifdef _WIN32
+	sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
+#else
+	sprintf(FileName, "ChatMessages/Message-%lld.nmsg", MessagesCount);
+#endif
+	lpFile = fopen(FileName, "w");
+	if(lpFile == NULL) LogOut("Server Thread/ERROR", 0, "Saved Message Failed: Cannot create file '%s'!", FileName);
+	else {
+		fprintf(lpFile, "<%s> %s", uUser -> UserName, Message);
+		fclose(lpFile);
+	}
+	LogOut("Server Thread/INFO", 0, "[Message-%lld] <%s> %s", MessagesCount, uUser -> UserName, Message);
+	MessagesCount += 1;
+	return ;
+}
+int ModIsMentionedUser_API(const char* Message, const char* UserName, const char** FirstMentionedPos) {
+	int len = strlen(Message), i;
+	for(i = 0; i < len; i += 1) {
+		if(Message[i] == '@') {
+			char* Position = strchr(Message + 1 + i, ' ');
+			if(Position > Message + i && strncmp(Message + i + 1, UserName, Position - Message - i - 1) == 0) {
+				if(FirstMentionedPos != NULL) *FirstMentionedPos = Message + i;
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+int ModIsUserOnline_API(const char* UserName) {
+	struct ULIST *This = UL_Head -> Next;
+	while(This != NULL) {
+		if(strcmp(This -> UserName, UserName) == 0) return 1;
+		This = This -> Next;
+	}
+	return 0;
+}
+int ModMakeUserSilence_API(const char* ModuleName, const char* UserName) {
+	struct ULIST *This = UL_Head -> Next;
+	while(This != NULL) {
+		if(strcmp(This -> UserName, UserName) == 0) {
+			int i, FirstFreePlace = -1;
+			for(i = 1; i <= SilencerListCount; i += 1) {
+				if(SilencerList[i] == NULL) FirstFreePlace = i;
+				if(SilencerList[i] != NULL && strcmp(UserName, SilencerList[i]) == 0) {
+					return -2;
+				}
+			}
+			if(FirstFreePlace == -1) {
+				FirstFreePlace = SilencerListCount + 1;
+				SilencerListCount += 1;
+			}
+			SilencerList[FirstFreePlace] = (char*)calloc(32767, sizeof(char));
+			strcpy(SilencerList[FirstFreePlace], UserName);
+			char SendMsg[4];
+			SendMsg[0] = '\x10';
+			SendMsg[1] = strlen(SilencerList[FirstFreePlace]);
+			time_t Time;
+			time(&Time);
+#ifdef _WIN32
+			FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+			FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+			fwrite(SendMsg, sizeof(char), 1, lpFile);
+			fwrite(&Time, sizeof(Time), 1, lpFile);
+			fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
+			fwrite(SilencerList[FirstFreePlace], sizeof(char), SendMsg[1], lpFile);
+			fclose(lpFile);
+			This = UL_Head -> Next;
+			while(This != NULL) {
+				if(This -> UserBindClient != 0) {
+					send(This -> UserBindClient, SendMsg, 1, 0);
+					send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+					send(This -> UserBindClient, SendMsg + 1, 1, 0);
+					send(This -> UserBindClient, SilencerList[FirstFreePlace], SendMsg[1], 0);
+				}
+				else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[FirstFreePlace], 4, NULL, Time);
+				This = This -> Next;
+			}
+			LogOut("Server Thread/INFO", 0, "User %s is a silencer now by %s.", SilencerList[FirstFreePlace], ModuleName);
+			return 0;
+		}
+		This = This -> Next;
+	}
+	return -1;
+}
+int ModMakeUserNotSilence_API(const char* ModuleName, const char* UserName) {
+	struct ULIST *This = UL_Head -> Next;
+	while(This != NULL) {
+		if(strcmp(This -> UserName, UserName) == 0) {
+			int i;
+			for(i = 1; i <= SilencerListCount; i += 1) {
+				if(SilencerList[i] != NULL && strcmp(UserName, SilencerList[i]) == 0) {
+					char SendMsg[4];
+					SendMsg[0] = '\x11';
+					SendMsg[1] = strlen(SilencerList[i]);
+					time_t Time;
+					time(&Time);
+#ifdef _WIN32
+					FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+					FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+					fwrite(SendMsg, sizeof(char), 1, lpFile);
+					fwrite(&Time, sizeof(Time), 1, lpFile);
+					fwrite(SendMsg + 1, sizeof(char), 1, lpFile);
+					fwrite(SilencerList[i], sizeof(char), SendMsg[1], lpFile);
+					fclose(lpFile);
+					This = UL_Head -> Next;
+					while(This != NULL) {
+						if(This -> UserBindClient != 0) {
+							send(This -> UserBindClient, SendMsg, 1, 0);
+							send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+							send(This -> UserBindClient, SendMsg + 1, 1, 0);
+							send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+						}
+						else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 5, NULL, Time);
+						This = This -> Next;
+					}
+					LogOut("Server Thread/INFO", 0, "User %s has already unbanned from speaking by %s.", SilencerList[i], ModuleName);
+					free(SilencerList[i]);
+					SilencerList[i] = NULL;
+					return 0;
+				}
+			}
+			return -2;
+		}
+		This = This -> Next;
+	}
+	return -1;
+}
+int ModGetConfigValue_API(const char* NameSpace, const char* Key, char* Value) {
+	if(NameSpace == NULL || Key == NULL || Value == NULL || strlen(NameSpace) == 0 || strlen(Key) == 0 || strlen(NameSpace) + strlen(Key) + 1 >= 256) return -1;
+	char* RealKey = (char*)calloc(256 + 32, sizeof(char));
+	sprintf(RealKey, "%s:%s", NameSpace, Key);
+	int v = GetTrieValue(RealKey, Value, lpTrieRoot);
+	free(RealKey);
+	return v;
+}
+int ModSetConfigValue_API(const char* NameSpace, const char* Key, const char* Value) {
+	if(NameSpace == NULL || Key == NULL || Value == NULL || strlen(NameSpace) == 0 || strlen(Key) == 0 || strlen(NameSpace) + strlen(Key) + 1 >= 256) return -1;
+	char* RealKey = (char*)calloc(256 + 32, sizeof(char));
+	sprintf(RealKey, "%s:%s", NameSpace, Key);
+	SetTrieValue(RealKey, Value, lpTrieRoot);
+	free(RealKey);
+	return 0;
 }
 void* InputThread(void* lParam) {
 	char *lpstrInput = (char*)calloc(114514, sizeof(char)), *lpstrCommand = (char*)calloc(32767, sizeof(char));
@@ -361,18 +783,9 @@ void* InputThread(void* lParam) {
 				LogOut("Server Thread/ERROR", 0, "Incomplete arguments for command say!");
 				continue;
 			}
-			struct ULIST *This = UL_Head;
-			int iLength = strlen(lpstrInput + 4);
-			time_t Time = time(NULL);
-			while(This != NULL) {
-				send(This -> UserBindClient, "\xF", 1, 0); 
-				send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-				send(This -> UserBindClient, "\x6Server", 7, 0);
-				send(This -> UserBindClient, (const char*)&iLength, sizeof(iLength), 0);
-				send(This -> UserBindClient, lpstrInput + 4, iLength, 0);
-				This = This -> Next;
-			}
 			char FileName[32767];
+			time_t Time = time(NULL);
+			int iLength = strlen(lpstrInput + 4);
 #ifdef _WIN32
 			sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
 #else
@@ -399,6 +812,18 @@ void* InputThread(void* lParam) {
 			}
 			LogOut("Server Thread/INFO", 0, "[Message-%lld] <Server> %s", MessagesCount, lpstrInput + 4);
 			MessagesCount += 1;
+			struct ULIST *This = UL_Head -> Next;
+			while(This != NULL) {
+				if(This -> UserBindClient != 0) {
+					send(This -> UserBindClient, "\xF", 1, 0); 
+					send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+					send(This -> UserBindClient, "\x6Server", 7, 0);
+					send(This -> UserBindClient, (const char*)&iLength, sizeof(iLength), 0);
+					send(This -> UserBindClient, lpstrInput + 4, iLength, 0);
+				}
+				else This -> VirtualUserMsgHandler(This -> UserName, "Server", 0, lpstrInput + 4, Time);
+				This = This -> Next;
+			}
 		}
 		else if(strcmp(lpstrCommand, "viewmsg") == 0) {
 			if(lpstrInput[7] != ' ') {
@@ -474,10 +899,13 @@ void* InputThread(void* lParam) {
 				fwrite(SilencerList[i], sizeof(char), SendMsg[1], lpFile);
 				fclose(lpFile);
 				while(This != NULL) {
-					send(This -> UserBindClient, SendMsg, 1, 0);
-					send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-					send(This -> UserBindClient, SendMsg + 1, 1, 0);
-					send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+					if(This -> UserBindClient != 0) {
+						send(This -> UserBindClient, SendMsg, 1, 0);
+						send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+						send(This -> UserBindClient, SendMsg + 1, 1, 0);
+						send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+					}
+					else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 4, NULL, Time);
 					This = This -> Next;
 				}
 				LogOut("Server Thread/INFO", 0, "User %s is a silencer.", SilencerList[i]);
@@ -512,10 +940,13 @@ void* InputThread(void* lParam) {
 					fwrite(SilencerList[i], sizeof(char), SendMsg[1], lpFile);
 					fclose(lpFile);
 					while(This != NULL) {
-						send(This -> UserBindClient, SendMsg, 1, 0);
-						send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-						send(This -> UserBindClient, SendMsg + 1, 1, 0);
-						send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+						if(This -> UserBindClient != 0) {
+							send(This -> UserBindClient, SendMsg, 1, 0);
+							send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+							send(This -> UserBindClient, SendMsg + 1, 1, 0);
+							send(This -> UserBindClient, SilencerList[i], SendMsg[1], 0);
+						}
+						else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 5, NULL, Time);
 						This = This -> Next;
 					}
 					RealSLC -= 1;
@@ -681,10 +1112,13 @@ void* SocketHandler(void* lParam) {
 							SendMsg[0] = '\xA';
 							SendMsg[1] = strlen(UL_New -> UserName);
 							while(This != NULL) {
-								send(This -> UserBindClient, SendMsg, 1, 0);
-								send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-								send(This -> UserBindClient, SendMsg + 1, 1, 0);
-								send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+								if(This -> UserBindClient != 0) {
+									send(This -> UserBindClient, SendMsg, 1, 0);
+									send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+									send(This -> UserBindClient, SendMsg + 1, 1, 0);
+									send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+								}
+								else This -> VirtualUserMsgHandler(This -> UserName, UL_New -> UserName, 1, NULL, Time);
 								This = This -> Next;
 							}
 							pthread_mutex_lock(&thread_lock_Sync);
@@ -719,11 +1153,11 @@ void* SocketHandler(void* lParam) {
 					break;
 				}
 				case 0xB: {//Send Message(Text)
-#ifdef _WIN32
+/*#ifdef _WIN32
 					__int64 iSize;
 #else
 					__int64_t iSize;//Linux just use __int64_t
-#endif
+#endif*/
 					int i, isOk = 0;
 					for(i = 0; i <= SilencerListCount; i += 1) {
 						if(SilencerList[i] != NULL && strcmp(UL_New -> UserName, SilencerList[i]) == 0) {
@@ -744,15 +1178,17 @@ void* SocketHandler(void* lParam) {
 					time_t Time;
 					time(&Time);
 					while(This != NULL) {
-						send(This -> UserBindClient, SendMsg, 1, 0);
-						send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-						send(This -> UserBindClient, SendMsg + 1, 1, 0);
-						send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
-						send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
+						if(This -> UserBindClient != 0) {
+							send(This -> UserBindClient, SendMsg, 1, 0);
+							send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+							send(This -> UserBindClient, SendMsg + 1, 1, 0);
+							send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+							send(This -> UserBindClient, (const char*)&iLen, sizeof(iLen), 0);
+						}
 						This = This -> Next;
 					}
 					if(isOk == 0) {
-						char FileName[32767];
+						char FileName[32767], *Message = (char*)calloc(262144, sizeof(char));
 #ifdef _WIN32
 						sprintf(FileName, "ChatMessages\\Message-%lld.nmsg", MessagesCount);
 #else
@@ -778,12 +1214,13 @@ void* SocketHandler(void* lParam) {
 						while(iCount < iLen) {
 							memset(ReceiveData, 0, sizeof(ReceiveData));
 							iResult = recv(ClientSocket, ReceiveData, sizeof(ReceiveData) - 1, 0);//Read Message
+							strcat(Message, ReceiveData);
 							if(iResult <= 0) break;
 							iCount += iResult;
 							if(lpFile != NULL) fprintf(lpFile, "%s", ReceiveData);
 							This = UL_Head -> Next;
 							while(This != NULL) {
-								send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
+								if(This -> UserBindClient != 0) send(This -> UserBindClient, ReceiveData, iResult, 0);//Send Message
 								This = This -> Next;
 							}
 							if(lpFileHistory != NULL) fwrite(ReceiveData, sizeof(char), iResult, lpFileHistory);
@@ -806,6 +1243,14 @@ void* SocketHandler(void* lParam) {
 						//pthread_mutex_unlock(&thread_lock_Sync);
 						printf("\n");
 						MessagesCount += 1;
+						This = UL_Head -> Next;
+						while(This != NULL) {
+							if(This -> UserBindClient == 0) {
+								This -> VirtualUserMsgHandler(This -> UserName, UL_New -> UserName, 0, Message, Time);
+							}
+							This = This -> Next;
+						}
+						free(Message);
 					}
 					else {
 						LogOut("Server Thread/WARN", 0, "Silencer '%s' is trying to send message.", UL_New -> UserName);
@@ -906,17 +1351,24 @@ void* SocketHandler(void* lParam) {
 						time_t Time;
 						time(&Time);
 						while(This != NULL) {
-							send(This -> UserBindClient, "\xE", 1, 0);
-							send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-							send(This -> UserBindClient, (const char*)&NameLength, sizeof(NameLength), 0);
-							send(This -> UserBindClient, UserName, NameLength, 0);
-							send(This -> UserBindClient, (const char*)&FileNameLength, sizeof(FileNameLength), 0);
-							send(This -> UserBindClient, FileName + 10, FileNameLength, 0);
-							send(This -> UserBindClient, (const char*)&FileSize, sizeof(FileSize), 0);
+							if(This -> UserBindClient != 0) {
+								send(This -> UserBindClient, "\xE", 1, 0);
+								send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+								send(This -> UserBindClient, (const char*)&NameLength, sizeof(NameLength), 0);
+								send(This -> UserBindClient, UserName, NameLength, 0);
+								send(This -> UserBindClient, (const char*)&FileNameLength, sizeof(FileNameLength), 0);
+								send(This -> UserBindClient, FileName + 10, FileNameLength, 0);
+								send(This -> UserBindClient, (const char*)&FileSize, sizeof(FileSize), 0);
+							}
+							else This -> VirtualUserMsgHandler(This -> UserName, UserName, 3, FileName + 10, Time);
 							This = This -> Next;
 						}
 						pthread_mutex_lock(&thread_lock_Sync);
+#ifdef _WIN32 
 						FILE* lpFileHistory = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+						FILE* lpFileHistory = fopen("configs/chathistory.nchatserver", "ab");
+#endif
 						if(lpFileHistory != NULL) {
 							fwrite("\xE", 1, 1, lpFileHistory);
 							fwrite(&Time, sizeof(Time), 1, lpFileHistory);
@@ -1083,10 +1535,13 @@ void* SocketHandler(void* lParam) {
 		time_t Time;
 		time(&Time);
 		while(This != NULL) {
-			send(This -> UserBindClient, SendMsg, 1, 0);
-			send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
-			send(This -> UserBindClient, SendMsg + 1, 1, 0);
-			send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+			if(This -> UserBindClient != 0) {
+				send(This -> UserBindClient, SendMsg, 1, 0);
+				send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+				send(This -> UserBindClient, SendMsg + 1, 1, 0);
+				send(This -> UserBindClient, UL_New -> UserName, SendMsg[1], 0);
+			}
+			else This -> VirtualUserMsgHandler(This -> UserName, UL_New -> UserName, 2, NULL, Time);
 			This = This -> Next;
 		}
 		pthread_mutex_lock(&thread_lock_Sync);
@@ -1110,9 +1565,35 @@ void* SocketHandler(void* lParam) {
 	return NULL;
 }
 int main() {
-	int iSendResult, iResult, iEnum, iTmp;
-	unsigned char ICSize, ICSize2;
+	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server(Version %d.%d.%d)", (unsigned char)VersionData[0], (unsigned char)VersionData[1], (unsigned char)VersionData[2]);
+	LogOut("Server Startup/INFO", 0, "Loading config files...");
+	lpTrieRoot = (LPTRIETWIGS)calloc(1, sizeof(TRIETWIGS));
 	FILE *lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\trie.nchatserver"
+#else
+	"configs/trie.nchatserver"
+#endif
+	, "rb");
+	if(lpConfig != NULL) {
+		char Key[256], *pValue = NULL;
+		int iKeyLength = 0, iValueLength = 0;
+		while(1) {
+			memset(Key, 0, sizeof(Key));
+			if(fread(&iKeyLength, sizeof(char), 1, lpConfig) <= 0) break;
+			fread(Key, sizeof(char), iKeyLength, lpConfig);
+			fread(&iValueLength, sizeof(iValueLength), 1, lpConfig);
+			pValue = (char*)calloc(sizeof(char), iValueLength + 5);
+			fread(pValue, sizeof(char), iValueLength, lpConfig);
+			SetTrieValue(Key, pValue, lpTrieRoot);
+			free(pValue);
+		}
+		LogOut("Config Loader/INFO", 0, "Trie Config File loaded \033[32msuccessfully\033[0m");
+	}
+	else LogOut("Config Loader/WARN", 0, "Loaded trie config file \033[31mfailed\033[0m! %s", strerror(errno));
+	int iResult, iEnum, iTmp;
+	unsigned char ICSize, ICSize2;
+	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\config.nchatserver"
 #else
@@ -1139,6 +1620,7 @@ int main() {
 			fseek(lpConfig, 284, SEEK_SET);
 			fread(&UserLimit, sizeof(UserLimit), 1, lpConfig);
 			fread(RoomName, sizeof(char), 256, lpConfig);
+			LogOut("Config Loader/INFO", 0, "Server Config File loaded \033[32msuccessfully\033[0m");
 		} 
 		else LogOut("Server Thread/WARN", 0, "Illegal config file.");
 		fclose(lpConfig);
@@ -1204,16 +1686,74 @@ int main() {
 			fclose(lpConfig);
 		}
 	}
-	else for(iEnum = 0; iEnum < 128; iEnum++) {
-		int iRand = rand() % 62;
-		if(iRand < 26) InvitationCode[iEnum] = iRand + 'A';
-		else if(iRand < 36) InvitationCode[iEnum] = iRand + '0' - 26;
-		else InvitationCode[iEnum] = iRand + 'a' - 36;
+	else {
+		LogOut("Config Loader/WARN", 0, "Loaded trie config file \033[31mfailed\033[0m! %s", strerror(errno));
+		for(iEnum = 0; iEnum < 128; iEnum++) {
+			int iRand = rand() % 62;
+			if(iRand < 26) InvitationCode[iEnum] = iRand + 'A';
+			else if(iRand < 36) InvitationCode[iEnum] = iRand + '0' - 26;
+			else InvitationCode[iEnum] = iRand + 'a' - 36;
+		}
+		UserLimit = 20;
 	}
 	//strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
 	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(struct ULIST));
-	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server(Version %d.%d.%d)", (unsigned char)VersionData[0], (unsigned char)VersionData[1], (unsigned char)VersionData[2]);
-	LogOut("Server Startup/INFO", 0, "Loading config file...");
+	LogOut("Mod Loader/INFO", 0, "Loading mods...");
+	ModInterface.cbSize = sizeof(ModInterface);
+	ModInterface.ModLogOut = ModLogOut_API;
+	ModInterface.ModGetUsersList = ModGetUsersList_API;
+	ModInterface.ModCreateUser = ModCreateUser_API;
+	ModInterface.ModCloseUser = ModCloseUser_API;
+	ModInterface.ModFakeUserSpeak = ModFakeUserSpeak_API;
+	ModInterface.ModIsMentionedUser = ModIsMentionedUser_API;
+	ModInterface.ModIsUserOnline = ModIsUserOnline_API;
+	ModInterface.ModMakeUserSilence = ModMakeUserSilence_API;
+	ModInterface.ModMakeUserNotSilence = ModMakeUserNotSilence_API;
+	ModInterface.ModGetConfigValue = ModGetConfigValue_API;
+	ModInterface.ModSetConfigValue = ModSetConfigValue_API;
+#ifdef _WIN32
+	WIN32_FIND_DATAA wfd;
+	HANDLE hFind = FindFirstFileA("Mods\\*.dll", &wfd);
+	if(hFind == NULL || hFind == INVALID_HANDLE_VALUE) {
+		LogOut("Mod Loader/WARN", 0, "Directory 'Mods' does not exist!");
+		LogOut("Mod Loader/WARN", 0, "Canceled loading mods.");
+	}
+	else {
+		char *ModPath = (char*)calloc(32767, sizeof(char));
+		int ModCount = 0;
+		do {
+			if((wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+				//int i = strlen(wfd.cFileName) - 1;
+				//while(i >= 0 && wfd.cFileName[i] != '.') i -= 1;
+				//if(i >= 0 && strcmp(wfd.cFileName + i + 1, "dll"))
+				GetCurrentDirectory(32766, ModPath);
+				sprintf(ModPath + strlen(ModPath), "\\Mods\\%s", wfd.cFileName);
+				LogOut("Mod Loader/INFO", 0, "Scanned Mod File Name: %s", wfd.cFileName);
+				hMods[++ModCount] = LoadLibraryA(ModPath);
+				if(hMods[ModCount] != NULL && hMods[ModCount] != INVALID_HANDLE_VALUE) {
+					LogOut("Mod Loader/INFO", 0, "Loading mod '%s'...", wfd.cFileName);
+					MODINITFUNC ModInit = (MODINITFUNC)GetProcAddress(hMods[ModCount], "InitInterfaces");
+					if(ModInit == NULL) {
+						LogOut("Mod Loader/ERROR", 0, "Mod '%s' is not available!", wfd.cFileName);
+						ModCount -= 1;
+					}
+					else {
+						ModsName[ModCount] = (char*)calloc(256, sizeof(char));
+						ModInit(&ModInterface, ModsName[ModCount]);
+						LogOut("Mod Loader/INFO", 0, "Mod %s(%s) loaded \033[32msuccessfully\033[0m. ", ModsName[ModCount], wfd.cFileName);
+					}
+				}
+				else {
+					LogOut("Mod Loader/WARN", 0, "Mod '%s' loaded failed!", wfd.cFileName);
+					ModCount -= 1;
+				}
+			}
+		}while(FindNextFileA(hFind, &wfd));
+		free(ModPath);
+		LogOut("Mod Loader/INFO", 0, "Loaded %d mods.", ModCount);
+	}
+#else //TODO: Add the POSIX Systems Support
+#endif
 #ifdef _WIN32 //Windows Server
 	WSADATA wsaData;
 	if(WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -1298,8 +1838,9 @@ int main() {
 		fwrite(&UserLimit, sizeof(UserLimit), 1, lpConfig);
 		fwrite(RoomName, sizeof(char), 256, lpConfig);
 		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Main Config file saved.");
+		LogOut("Server Close/INFO", 0, "Main Config file saved \033[32msuccessfully\033[0m.");
 	}
+	else LogOut("Server Close/INFO", 0, "Main Config file saved \033[31mfailed\033[0m.");
 	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\blacklist.nchatserver"
@@ -1319,8 +1860,9 @@ int main() {
 			}
 		}
 		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Blacklist saved.");
+		LogOut("Server Close/INFO", 0, "Blacklist saved \033[32msuccessfully\033[0m.");
 	}
+	else LogOut("Server Close/INFO", 0, "Blacklist saved \033[31mfailed\033[0m.");
 	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\whitelist.nchatserver"
@@ -1340,8 +1882,9 @@ int main() {
 			}
 		}
 		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Whitelist saved.");
+		LogOut("Server Close/INFO", 0, "Whitelist saved \033[32msuccessfully\033[0m.");
 	}
+	else LogOut("Server Close/INFO", 0, "Whitelist saved \033[31mfailed\033[0m.");
 	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\silencerlist.nchatserver"
@@ -1360,7 +1903,20 @@ int main() {
 			}
 		}
 		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Silencerlist saved.");
+		LogOut("Server Close/INFO", 0, "Silencerlist saved \033[32msuccessfully\033[0m.");
+	}
+	else LogOut("Server Close/INFO", 0, "Silencerlist saved \033[31mfailed\033[0m.");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\trie.nchatserver"
+#else
+	"configs/trie.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		SaveTrieConfigs(lpConfig, lpTrieRoot, 0);
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Trie Configs File saved \033[32msuccessfully\033[0m.");
 	}
 	return 0;
 }
