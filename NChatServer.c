@@ -1,5 +1,5 @@
 #define _FILE_OFFSET_BITS 64
-#include "Mods/NChatServerModAPI.h"
+#include "Plugins/NChatServerPluginAPI.h"
 #include <pthread.h>
 //#include <dlfcn.h>
 #ifdef _WIN32
@@ -11,6 +11,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <dlfcn.h>
+#include <dirent.h> 
 #ifndef SOCKET
 #if 1
 typedef unsigned long long	SOCKET;
@@ -33,14 +35,14 @@ typedef long long		SOCKET;
 #define PLAIN_HTML "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n"
 #define PLAIN_DATA "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n"
 #define NOT_FOUND "HTTP/1.1 404\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><hr>NChat Server</center></body>"
-MODINTERFACE ModInterface;
-typedef void (*MODINITFUNC)(LPMODINTERFACE, char*);
-char *ModsName[32767];
+PLUGININTERFACE PluginInterface;
+typedef void (*PLUGININITFUNC)(LPPLUGININTERFACE, char*);
+char *PluginsName[32767];
 char PathToTrieConfigs[256 + 32];
 typedef struct tagTRIETWIGS{
 	int size;
 	char *Value;
-	tagTRIETWIGS *Next[132];
+	struct tagTRIETWIGS *Next[132];
 }TRIETWIGS, *LPTRIETWIGS;
 LPTRIETWIGS lpTrieRoot = NULL;
 int GetTrieValue(const char* Key, char* Value, LPTRIETWIGS lpRoot) {
@@ -130,8 +132,9 @@ unsigned long long MessagesCount = 0;
 SOCKET ListenSocket;
 pthread_mutex_t thread_lock, thread_lock_Sync;
 #ifdef _WIN32
-HMODULE hMods[32767];
+HMODULE hPlugins[32767];
 #else
+void* hPlugins[32767];
 #endif
 int send_lock(SOCKET s, const char *buf, int len, int flags) {
 	pthread_mutex_lock(&thread_lock);
@@ -205,7 +208,7 @@ void vLogOut(const char* Poster, int NoNewLine, const char* Format, va_list v) {
     if(NoNewLine == 0) printf("\n");
 	return ;
 }
-void ModLogOut_API(const char* ModuleName, const char* Type, int NoNewLine, const char* Format, ...) {
+void PluginLogOut_API(const char* ModuleName, const char* Type, int NoNewLine, const char* Format, ...) {
 	char Poster[32767];
 	va_list v;
 	va_start(v, Format);
@@ -214,7 +217,7 @@ void ModLogOut_API(const char* ModuleName, const char* Type, int NoNewLine, cons
 	va_end(v);
 	return ;
 }
-int ModGetUsersList_API(char **Users, int iBufferMax) {
+int PluginGetUsersList_API(char **Users, int iBufferMax) {
 	if(Users != NULL) {
 		int i = 0;
 		struct ULIST *This = UL_Head -> Next;
@@ -227,7 +230,7 @@ int ModGetUsersList_API(char **Users, int iBufferMax) {
 	}
 	return UsersCount;
 }
-HUSER ModCreateUser_API(const char* ModuleName, const char* UserName, MSGLISTENERFUNC MsgListener) {
+HUSER PluginCreateUser_API(const char* ModuleName, const char* UserName, MSGLISTENERFUNC MsgListener) {
 	if(UsersCount >= UserLimit) return NULL;
 	struct ULIST *This = UL_Head -> Next;
 	int HasSame = 0;
@@ -239,7 +242,7 @@ HUSER ModCreateUser_API(const char* ModuleName, const char* UserName, MSGLISTENE
 		This = This -> Next;
 	}
 	if(HasSame == 1) return NULL;
-	struct ULIST *NewUser = (struct ULIST*)calloc(1, sizeof(ULIST));
+	struct ULIST *NewUser = (struct ULIST*)calloc(1, sizeof(struct ULIST));
 	strcpy(NewUser -> UserName, UserName);
 	NewUser -> VirtualUserMsgHandler = MsgListener;
 	time_t Time = time(NULL);
@@ -275,10 +278,10 @@ HUSER ModCreateUser_API(const char* ModuleName, const char* UserName, MSGLISTENE
 		fclose(lpFile);
 	}
 	pthread_mutex_unlock(&thread_lock_Sync);
-	LogOut("Mod API/INFO", 0, "%s(%s) joined the chat room", UserName, ModuleName);
+	LogOut("Plugin API/INFO", 0, "%s(%s) joined the chat room", UserName, ModuleName);
 	return NewUser;
 }
-void ModCloseUser_API(const char* ModuleName, HUSER hUser) {
+void PluginCloseUser_API(const char* ModuleName, HUSER hUser) {
 	if(hUser == NULL || ModuleName == NULL) return;
 	struct ULIST *This = (struct ULIST*)hUser, *lpEnum;
 	This -> Last -> Next = This -> Next;
@@ -300,7 +303,7 @@ void ModCloseUser_API(const char* ModuleName, HUSER hUser) {
 		else lpEnum -> VirtualUserMsgHandler(lpEnum -> UserName, This -> UserName, 2, NULL, Time);
 		lpEnum = lpEnum -> Next;
 	}
-	LogOut("Mod API/INFO", 0, "%s left the chat room(%s)", This -> UserName, ModuleName);
+	LogOut("Plugin API/INFO", 0, "%s left the chat room(%s)", This -> UserName, ModuleName);
 	pthread_mutex_lock(&thread_lock_Sync);
 #ifdef _WIN32
 	FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
@@ -319,7 +322,7 @@ void ModCloseUser_API(const char* ModuleName, HUSER hUser) {
 	UsersCount -= 1;
 	return ;
 }
-void ModFakeUserSpeak_API(HUSER hUser, int NeedCallBack, const char *Message) {
+void PluginFakeUserSpeak_API(HUSER hUser, int NeedCallBack, const char *Message) {
 	if(hUser == NULL || Message == NULL || (Message != NULL && strcmp(Message, "") == 0)) return;
 	struct ULIST *This = UL_Head -> Next, *uUser = (struct ULIST*)hUser;
 	time_t Time;
@@ -374,7 +377,7 @@ void ModFakeUserSpeak_API(HUSER hUser, int NeedCallBack, const char *Message) {
 	MessagesCount += 1;
 	return ;
 }
-int ModIsMentionedUser_API(const char* Message, const char* UserName, const char** FirstMentionedPos) {
+int PluginIsMentionedUser_API(const char* Message, const char* UserName, const char** FirstMentionedPos) {
 	int len = strlen(Message), i;
 	for(i = 0; i < len; i += 1) {
 		if(Message[i] == '@') {
@@ -387,7 +390,7 @@ int ModIsMentionedUser_API(const char* Message, const char* UserName, const char
 	}
 	return 0;
 }
-int ModIsUserOnline_API(const char* UserName) {
+int PluginIsUserOnline_API(const char* UserName) {
 	struct ULIST *This = UL_Head -> Next;
 	while(This != NULL) {
 		if(strcmp(This -> UserName, UserName) == 0) return 1;
@@ -395,7 +398,7 @@ int ModIsUserOnline_API(const char* UserName) {
 	}
 	return 0;
 }
-int ModMakeUserSilence_API(const char* ModuleName, const char* UserName) {
+int PluginMakeUserSilence_API(const char* ModuleName, const char* UserName) {
 	struct ULIST *This = UL_Head -> Next;
 	while(This != NULL) {
 		if(strcmp(This -> UserName, UserName) == 0) {
@@ -445,7 +448,7 @@ int ModMakeUserSilence_API(const char* ModuleName, const char* UserName) {
 	}
 	return -1;
 }
-int ModMakeUserNotSilence_API(const char* ModuleName, const char* UserName) {
+int PluginMakeUserNotSilence_API(const char* ModuleName, const char* UserName) {
 	struct ULIST *This = UL_Head -> Next;
 	while(This != NULL) {
 		if(strcmp(This -> UserName, UserName) == 0) {
@@ -490,7 +493,7 @@ int ModMakeUserNotSilence_API(const char* ModuleName, const char* UserName) {
 	}
 	return -1;
 }
-int ModGetConfigValue_API(const char* NameSpace, const char* Key, char* Value) {
+int PluginGetConfigValue_API(const char* NameSpace, const char* Key, char* Value) {
 	if(NameSpace == NULL || Key == NULL || Value == NULL || strlen(NameSpace) == 0 || strlen(Key) == 0 || strlen(NameSpace) + strlen(Key) + 1 >= 256) return -1;
 	char* RealKey = (char*)calloc(256 + 32, sizeof(char));
 	sprintf(RealKey, "%s:%s", NameSpace, Key);
@@ -498,7 +501,7 @@ int ModGetConfigValue_API(const char* NameSpace, const char* Key, char* Value) {
 	free(RealKey);
 	return v;
 }
-int ModSetConfigValue_API(const char* NameSpace, const char* Key, const char* Value) {
+int PluginSetConfigValue_API(const char* NameSpace, const char* Key, const char* Value) {
 	if(NameSpace == NULL || Key == NULL || Value == NULL || strlen(NameSpace) == 0 || strlen(Key) == 0 || strlen(NameSpace) + strlen(Key) + 1 >= 256) return -1;
 	char* RealKey = (char*)calloc(256 + 32, sizeof(char));
 	sprintf(RealKey, "%s:%s", NameSpace, Key);
@@ -1698,61 +1701,101 @@ int main() {
 	}
 	//strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
 	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(struct ULIST));
-	LogOut("Mod Loader/INFO", 0, "Loading mods...");
-	ModInterface.cbSize = sizeof(ModInterface);
-	ModInterface.ModLogOut = ModLogOut_API;
-	ModInterface.ModGetUsersList = ModGetUsersList_API;
-	ModInterface.ModCreateUser = ModCreateUser_API;
-	ModInterface.ModCloseUser = ModCloseUser_API;
-	ModInterface.ModFakeUserSpeak = ModFakeUserSpeak_API;
-	ModInterface.ModIsMentionedUser = ModIsMentionedUser_API;
-	ModInterface.ModIsUserOnline = ModIsUserOnline_API;
-	ModInterface.ModMakeUserSilence = ModMakeUserSilence_API;
-	ModInterface.ModMakeUserNotSilence = ModMakeUserNotSilence_API;
-	ModInterface.ModGetConfigValue = ModGetConfigValue_API;
-	ModInterface.ModSetConfigValue = ModSetConfigValue_API;
+	LogOut("Plugin Loader/INFO", 0, "Loading Plugins...");
+	PluginInterface.cbSize = sizeof(PluginInterface);
+	PluginInterface.PluginLogOut = PluginLogOut_API;
+	PluginInterface.PluginGetUsersList = PluginGetUsersList_API;
+	PluginInterface.PluginCreateUser = PluginCreateUser_API;
+	PluginInterface.PluginCloseUser = PluginCloseUser_API;
+	PluginInterface.PluginFakeUserSpeak = PluginFakeUserSpeak_API;
+	PluginInterface.PluginIsMentionedUser = PluginIsMentionedUser_API;
+	PluginInterface.PluginIsUserOnline = PluginIsUserOnline_API;
+	PluginInterface.PluginMakeUserSilence = PluginMakeUserSilence_API;
+	PluginInterface.PluginMakeUserNotSilence = PluginMakeUserNotSilence_API;
+	PluginInterface.PluginGetConfigValue = PluginGetConfigValue_API;
+	PluginInterface.PluginSetConfigValue = PluginSetConfigValue_API;
 #ifdef _WIN32
 	WIN32_FIND_DATAA wfd;
-	HANDLE hFind = FindFirstFileA("Mods\\*.dll", &wfd);
+	HANDLE hFind = FindFirstFileA("Plugins\\*.dll", &wfd);
 	if(hFind == NULL || hFind == INVALID_HANDLE_VALUE) {
-		LogOut("Mod Loader/WARN", 0, "Directory 'Mods' does not exist!");
-		LogOut("Mod Loader/WARN", 0, "Canceled loading mods.");
+		LogOut("Plugin Loader/WARN", 0, "Directory 'Plugins' does not exist!");
+		LogOut("Plugin Loader/WARN", 0, "Canceled loading Plugins.");
 	}
 	else {
-		char *ModPath = (char*)calloc(32767, sizeof(char));
-		int ModCount = 0;
+		char *PluginPath = (char*)calloc(32767, sizeof(char));
+		int PluginCount = 0;
 		do {
 			if((wfd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
 				//int i = strlen(wfd.cFileName) - 1;
 				//while(i >= 0 && wfd.cFileName[i] != '.') i -= 1;
 				//if(i >= 0 && strcmp(wfd.cFileName + i + 1, "dll"))
-				GetCurrentDirectory(32766, ModPath);
-				sprintf(ModPath + strlen(ModPath), "\\Mods\\%s", wfd.cFileName);
-				LogOut("Mod Loader/INFO", 0, "Scanned Mod File Name: %s", wfd.cFileName);
-				hMods[++ModCount] = LoadLibraryA(ModPath);
-				if(hMods[ModCount] != NULL && hMods[ModCount] != INVALID_HANDLE_VALUE) {
-					LogOut("Mod Loader/INFO", 0, "Loading mod '%s'...", wfd.cFileName);
-					MODINITFUNC ModInit = (MODINITFUNC)GetProcAddress(hMods[ModCount], "InitInterfaces");
-					if(ModInit == NULL) {
-						LogOut("Mod Loader/ERROR", 0, "Mod '%s' is not available!", wfd.cFileName);
-						ModCount -= 1;
+				GetCurrentDirectory(32766, PluginPath);
+				sprintf(PluginPath + strlen(PluginPath), "\\Plugins\\%s", wfd.cFileName);
+				LogOut("Plugin Loader/INFO", 0, "Scanned Plugin File Name: %s", wfd.cFileName);
+				hPlugins[++PluginCount] = LoadLibraryA(PluginPath);
+				if(hPlugins[PluginCount] != NULL && hPlugins[PluginCount] != INVALID_HANDLE_VALUE) {
+					LogOut("Plugin Loader/INFO", 0, "Loading Plugin '%s'...", wfd.cFileName);
+					PLUGININITFUNC PluginInit = (PLUGININITFUNC)GetProcAddress(hPlugins[PluginCount], "InitInterfaces");
+					if(PluginInit == NULL) {
+						LogOut("Plugin Loader/ERROR", 0, "Plugin '%s' is not available!", wfd.cFileName);
+						PluginCount -= 1;
 					}
 					else {
-						ModsName[ModCount] = (char*)calloc(256, sizeof(char));
-						ModInit(&ModInterface, ModsName[ModCount]);
-						LogOut("Mod Loader/INFO", 0, "Mod %s(%s) loaded \033[32msuccessfully\033[0m. ", ModsName[ModCount], wfd.cFileName);
+						PluginsName[PluginCount] = (char*)calloc(256, sizeof(char));
+						PluginInit(&PluginInterface, PluginsName[PluginCount]);
+						LogOut("Plugin Loader/INFO", 0, "Plugin %s(%s) loaded \033[32msuccessfully\033[0m. ", PluginsName[PluginCount], wfd.cFileName);
 					}
 				}
 				else {
-					LogOut("Mod Loader/WARN", 0, "Mod '%s' loaded failed!", wfd.cFileName);
-					ModCount -= 1;
+					LogOut("Plugin Loader/WARN", 0, "Plugin '%s' loaded failed!", wfd.cFileName);
+					PluginCount -= 1;
 				}
 			}
 		}while(FindNextFileA(hFind, &wfd));
-		free(ModPath);
-		LogOut("Mod Loader/INFO", 0, "Loaded %d mods.", ModCount);
+		free(PluginPath);
+		LogOut("Plugin Loader/INFO", 0, "Loaded %d Plugins.", PluginCount);
 	}
-#else //TODO: Add the POSIX Systems Support
+#else //DONE: Add the POSIX Systems Support
+	DIR *lpDir;
+	struct dirent *lpEntry;
+	lpDir = opendir("./Plugins");
+	if(lpDir != NULL) {
+		char *PluginPath = (char*)calloc(32767, sizeof(char));
+		int PluginCount;
+		while((lpEntry = readdir(lpDir)) != NULL) {
+			if(strcmp(lpEntry -> d_name, ".") != 0 && strcmp(lpEntry -> d_name, "..") != 0) {
+				int i = strlen(lpEntry -> d_name) - 1;
+				while(i >= 0 && lpEntry -> d_name[i] != '.') i -= 1;
+				if(i >= 0 && lpEntry -> d_name[i] == '.' && strcmp(lpEntry -> d_name + i, ".so") == 0) {
+					sprintf(PluginPath, "./Plugins/%s", lpEntry -> d_name);
+					LogOut("Plugin Loader/INFO", 0, "Scanned Plugin File Name: %s", lpEntry -> d_name);
+					hPlugins[++PluginCount] = dlopen(PluginPath, RTLD_LAZY);
+					if(hPlugins[PluginCount] != NULL) {
+						LogOut("Plugin Loader/INFO", 0, "Loading Plugin '%s'...", lpEntry -> d_name);
+						PLUGININITFUNC PluginInit = (PLUGININITFUNC)dlsym(hPlugins[PluginCount], "InitInterfaces");
+						char *lpError;
+						if((lpError = dlerror()) != NULL) {
+							LogOut("Plugin Loader/ERROR", 0, "Plugin '%s' is not available!", lpEntry -> d_name);
+							PluginCount -= 1;
+						}
+						else {
+							PluginsName[PluginCount] = (char*)calloc(256, sizeof(char));
+							PluginInit(&PluginInterface, PluginsName[PluginCount]);
+							LogOut("Plugin Loader/INFO", 0, "Plugin %s(%s) loaded \033[32msuccessfully\033[0m. ", PluginsName[PluginCount], lpEntry -> d_name);
+						}
+					}
+					else {
+						LogOut("Plugin Loader/WARN", 0, "Plugin '%s' loaded failed!", lpEntry -> d_name);
+						PluginCount -= 1;
+					}
+				}
+			}
+		}
+		closedir(lpDir);
+		free(PluginPath);
+		LogOut("Plugin Loader/INFO", 0, "Loaded %d Plugins.", PluginCount);
+	}
+	else LogOut("Plugin Loader/ERROR", 0, "opendir failed! Cannot load Plugins!");
 #endif
 #ifdef _WIN32 //Windows Server
 	WSADATA wsaData;
