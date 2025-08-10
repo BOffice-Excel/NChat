@@ -120,7 +120,9 @@ void SetTrieValue(const char* Key, const char* Value, LPTRIETWIGS lpRoot) {
 }
 unsigned short ListenPort = 7900, BlackListCount, WhiteListCount, RealBLC, RealWLC, SilencerListCount, RealSLC;
 char LogBuf[1145], LogBuf2[1145141910], InvitationCode[256], *BlackList[65546], *WhiteList[65546], *SilencerList[65546], EnableBlackList, EnableWhiteList, RoomName[512];
-const char *VersionData = "\x1\x3\x0";
+const char *VersionData = "\x1\x3\x1";
+int iEnum, iTmp;
+unsigned char ICSize, ICSize2;
 struct ULIST{
 	char UserName[512];
 	SOCKET UserBindClient;
@@ -128,6 +130,10 @@ struct ULIST{
 	struct ULIST *Next, *Last;
 }*UL_Head, *UL_Last;
 unsigned int UsersCount = 0, UserLimit;
+struct MSGLISTENERS{
+	MSGLISTENERNOUSERFUNC ListenerFunc;
+	struct MSGLISTENERS *lpNext, *lpLast;
+}*Listener_Head, *Listener_Last;
 unsigned long long MessagesCount = 0;
 SOCKET ListenSocket;
 pthread_mutex_t thread_lock, thread_lock_Sync;
@@ -260,6 +266,12 @@ HUSER PluginCreateUser_API(const char* ModuleName, const char* UserName, MSGLIST
 		}
 		This = This -> Next;
 	}
+	struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+	while(ListenerFunction != NULL) {
+		LFNext = ListenerFunction -> lpNext;
+		ListenerFunction -> ListenerFunc(UserName, 1, NULL, Time);
+		ListenerFunction = LFNext;
+	}
 	NewUser -> Last = UL_Last;
 	UL_Last -> Next = NewUser;
 	UL_Last = NewUser;
@@ -303,6 +315,12 @@ void PluginCloseUser_API(const char* ModuleName, HUSER hUser) {
 		else lpEnum -> VirtualUserMsgHandler(lpEnum -> UserName, This -> UserName, 2, NULL, Time);
 		lpEnum = lpEnum -> Next;
 	}
+	struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+	while(ListenerFunction != NULL) {
+		LFNext = ListenerFunction -> lpNext;
+		ListenerFunction -> ListenerFunc(This -> UserName, 2, NULL, Time);
+		ListenerFunction = LFNext;
+	}
 	LogOut("Plugin API/INFO", 0, "%s left the chat room(%s)", This -> UserName, ModuleName);
 	pthread_mutex_lock(&thread_lock_Sync);
 #ifdef _WIN32
@@ -344,6 +362,12 @@ void PluginFakeUserSpeak_API(HUSER hUser, int NeedCallBack, const char *Message)
 		}
 		else This -> VirtualUserMsgHandler(This -> UserName, uUser -> UserName, 0, Message, Time);
 		This = This -> Next;
+	}
+	struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+	while(ListenerFunction != NULL) {
+		LFNext = ListenerFunction -> lpNext;
+		ListenerFunction -> ListenerFunc(uUser -> UserName, 0, Message, Time);
+		ListenerFunction = LFNext;
 	}
 	pthread_mutex_lock(&thread_lock_Sync);
 #ifdef _WIN32
@@ -441,6 +465,12 @@ int PluginMakeUserSilence_API(const char* ModuleName, const char* UserName) {
 				else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[FirstFreePlace], 4, NULL, Time);
 				This = This -> Next;
 			}
+			struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+			while(ListenerFunction != NULL) {
+				LFNext = ListenerFunction -> lpNext;
+				ListenerFunction -> ListenerFunc(SilencerList[FirstFreePlace], 4, NULL, Time);
+				ListenerFunction = LFNext;
+			}
 			LogOut("Server Thread/INFO", 0, "User %s is a silencer now by %s.", SilencerList[FirstFreePlace], ModuleName);
 			return 0;
 		}
@@ -481,6 +511,12 @@ int PluginMakeUserNotSilence_API(const char* ModuleName, const char* UserName) {
 						else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 5, NULL, Time);
 						This = This -> Next;
 					}
+					struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+					while(ListenerFunction != NULL) {
+						LFNext = ListenerFunction -> lpNext;
+						ListenerFunction -> ListenerFunc(SilencerList[i], 5, NULL, Time);
+						ListenerFunction = LFNext;
+					}
 					LogOut("Server Thread/INFO", 0, "User %s has already unbanned from speaking by %s.", SilencerList[i], ModuleName);
 					free(SilencerList[i]);
 					SilencerList[i] = NULL;
@@ -509,6 +545,63 @@ int PluginSetConfigValue_API(const char* NameSpace, const char* Key, const char*
 	free(RealKey);
 	return 0;
 }
+void PluginGolbalMessage_API(const char* ModuleName, const char* Message) {
+	struct ULIST* This = UL_Head -> Next;
+	time_t Time = time(NULL);
+	char c = strlen(ModuleName);
+	int msglen = strlen(Message);
+	while(This != NULL) {
+		if(This -> VirtualUserMsgHandler == NULL) {
+			send(This -> UserBindClient, "\x12", 1, 0);
+			send(This -> UserBindClient, (const char*)&Time, sizeof(Time), 0);
+			send(This -> UserBindClient, &c, sizeof(c), 0);
+			send(This -> UserBindClient, ModuleName, c, 0);
+			send(This -> UserBindClient, (const char*)&msglen, sizeof(msglen), 0);
+			send(This -> UserBindClient, Message, msglen, 0);
+		}
+		else This -> VirtualUserMsgHandler(This -> UserName, ModuleName, 6, Message, Time);
+		This = This -> Next;
+	}
+	struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+	while(ListenerFunction != NULL) {
+		LFNext = ListenerFunction -> lpNext;
+		ListenerFunction -> ListenerFunc(ModuleName, 6, Message, Time);
+		ListenerFunction = LFNext;
+	}
+#ifdef _WIN32
+	FILE *lpFile = fopen("configs\\chathistory.nchatserver", "ab");
+#else
+	FILE *lpFile = fopen("configs/chathistory.nchatserver", "ab");
+#endif
+	if(lpFile != NULL) {
+		fwrite("\x12", sizeof(char), 1, lpFile);
+		fwrite(&Time, sizeof(Time), 1, lpFile);
+		fwrite(&c, sizeof(c), 1, lpFile);
+		fwrite(ModuleName, sizeof(char), c, lpFile);
+		fwrite(&msglen, sizeof(msglen), 1, lpFile);
+		fwrite(Message, sizeof(char), msglen, lpFile);
+		fclose(lpFile);
+	}
+	PluginLogOut_API(ModuleName, "INFO", 0, Message);
+	return ;
+}
+HNOUSERLISTENERFUNC PluginAddListener_API(MSGLISTENERNOUSERFUNC MsgListener) {
+	MSGLISTENERS *lpList = (MSGLISTENERS*)calloc(1, sizeof(MSGLISTENERS));
+	lpList -> ListenerFunc = MsgListener;
+	lpList -> lpLast = Listener_Last;
+	Listener_Last -> lpNext = lpList;
+	Listener_Last = lpList;
+	return (HNOUSERLISTENERFUNC)lpList;
+}
+void PluginRemoveListener_API(HNOUSERLISTENERFUNC hNoUserListenerFunc) {
+	if(hNoUserListenerFunc != NULL) {
+		struct MSGLISTENERS *lpListener = (struct MSGLISTENERS*)hNoUserListenerFunc;
+		if(lpListener -> lpNext != NULL) lpListener -> lpNext -> lpLast = lpListener -> lpLast;
+		lpListener -> lpLast -> lpNext = lpListener -> lpNext;
+		free(lpListener);
+	}
+	return ;
+}
 void* InputThread(void* lParam) {
 	char *lpstrInput = (char*)calloc(114514, sizeof(char)), *lpstrCommand = (char*)calloc(32767, sizeof(char));
 	int i, j;
@@ -532,10 +625,11 @@ void* InputThread(void* lParam) {
 		sscanf(lpstrInput, "%s", lpstrCommand);
 		if(strcmp(lpstrCommand, "exit") == 0) {
 			//LogOut("Server Thread/INFO", 0, "Stopping the Server");
-			closesocket(ListenSocket);
+/*			closesocket(ListenSocket);
 #ifdef _WIN32
 			WSACleanup();
-#endif
+#endif*/
+			exit(0);
 			return NULL;
 		}
 		else if(strcmp(lpstrCommand, "list") == 0) {
@@ -827,6 +921,12 @@ void* InputThread(void* lParam) {
 				else This -> VirtualUserMsgHandler(This -> UserName, "Server", 0, lpstrInput + 4, Time);
 				This = This -> Next;
 			}
+			struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+			while(ListenerFunction != NULL) {
+				LFNext = ListenerFunction -> lpNext;
+				ListenerFunction -> ListenerFunc("Server", 0, lpstrInput + 4, Time);
+				ListenerFunction = LFNext;
+			}
 		}
 		else if(strcmp(lpstrCommand, "viewmsg") == 0) {
 			if(lpstrInput[7] != ' ') {
@@ -911,6 +1011,12 @@ void* InputThread(void* lParam) {
 					else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 4, NULL, Time);
 					This = This -> Next;
 				}
+				struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+				while(ListenerFunction != NULL) {
+					LFNext = ListenerFunction -> lpNext;
+					ListenerFunction -> ListenerFunc(SilencerList[i], 4, NULL, Time);
+					ListenerFunction = LFNext;
+				}
 				LogOut("Server Thread/INFO", 0, "User %s is a silencer.", SilencerList[i]);
 			}
 			else if(strcmp(lpstrCommand, "remove") == 0) {
@@ -951,6 +1057,12 @@ void* InputThread(void* lParam) {
 						}
 						else This -> VirtualUserMsgHandler(This -> UserName, SilencerList[i], 5, NULL, Time);
 						This = This -> Next;
+					}
+					struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+					while(ListenerFunction != NULL) {
+						LFNext = ListenerFunction -> lpNext;
+						ListenerFunction -> ListenerFunc(SilencerList[i], 5, NULL, Time);
+						ListenerFunction = LFNext;
 					}
 					RealSLC -= 1;
 					LogOut("Server Thread/INFO", 0, "User %s is already not a silencer now.", SilencerList[i]);
@@ -997,7 +1109,7 @@ void* InputThread(void* lParam) {
 void* SocketHandler(void* lParam) {
 	SOCKET ClientSocket = (SOCKET)lParam;
 	char ReceiveData[32767];
-	int beLogined = 0;
+	int beLogined = 0, IsNChatCommand = 0;
 	struct ULIST* UL_New = NULL;
 	while(1) {
 		memset(ReceiveData, 0, sizeof(ReceiveData));
@@ -1007,7 +1119,16 @@ void* SocketHandler(void* lParam) {
 			break;
 		}
 		else if(iResult > 0) {
-			if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && ReceiveData[0] != '\x9' && ReceiveData[0] != '\xC' && ReceiveData[0] != '\x10' && beLogined == 0) {
+			if(ReceiveData[0] != 'N' && ReceiveData[0] != 'G' && IsNChatCommand == 0) {
+				send(ClientSocket, "\xB|ERR_NOT_NCHAT", 17, 0);//The client maybe not NChat Client
+			}
+			else if(ReceiveData[0] == 'N') {//NCHAT CLIENT HEADER
+				recv(ClientSocket, ReceiveData + 1, strlen("CHAT CLIENT HEADER"), 0);
+				if(strcmp(ReceiveData, "NCHAT CLIENT HEADER") == 0) {
+					IsNChatCommand = 1;
+				}
+			}
+			else if(ReceiveData[0] != '\xA' && ReceiveData[0] != 'G' && ReceiveData[0] != '\xE' && ReceiveData[0] != '\x9' && ReceiveData[0] != '\xC' && ReceiveData[0] != '\x10' && beLogined == 0) {
 				send(ClientSocket, "\x4|ERR_LOGIN_FIRST", 17, 0);//The client has problem could do this
 			}
 			else switch(ReceiveData[0]) {
@@ -1123,6 +1244,12 @@ void* SocketHandler(void* lParam) {
 								}
 								else This -> VirtualUserMsgHandler(This -> UserName, UL_New -> UserName, 1, NULL, Time);
 								This = This -> Next;
+							}
+							struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+							while(ListenerFunction != NULL) {
+								LFNext = ListenerFunction -> lpNext;
+								ListenerFunction -> ListenerFunc(UL_New -> UserName, 1, NULL, Time);
+								ListenerFunction = LFNext;
 							}
 							pthread_mutex_lock(&thread_lock_Sync);
 #ifdef _WIN32
@@ -1253,6 +1380,12 @@ void* SocketHandler(void* lParam) {
 							}
 							This = This -> Next;
 						}
+						struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+						while(ListenerFunction != NULL) {
+							LFNext = ListenerFunction -> lpNext;
+							ListenerFunction -> ListenerFunc(UL_New -> UserName, 0, Message, Time);
+							ListenerFunction = LFNext;
+						}
 						free(Message);
 					}
 					else {
@@ -1365,6 +1498,12 @@ void* SocketHandler(void* lParam) {
 							}
 							else This -> VirtualUserMsgHandler(This -> UserName, UserName, 3, FileName + 10, Time);
 							This = This -> Next;
+						}
+						struct MSGLISTENERS *ListenerFunction = Listener_Head -> lpNext, *LFNext;
+						while(ListenerFunction != NULL) {
+							LFNext = ListenerFunction -> lpNext;
+							ListenerFunction -> ListenerFunc(UserName, 3, FileName + 10, Time);
+							ListenerFunction = LFNext;
 						}
 						pthread_mutex_lock(&thread_lock_Sync);
 #ifdef _WIN32 
@@ -1567,6 +1706,121 @@ void* SocketHandler(void* lParam) {
 	//send(ClientSocket, "\x1|OK_LOGOUT", 11, 0);
 	return NULL;
 }
+void AtExit(void) {
+	struct ULIST *This = UL_Head -> Next, *lpNext;
+	while(This != NULL) {
+		lpNext = This -> Next;
+		if(This -> VirtualUserMsgHandler == NULL) {
+			closesocket(This -> UserBindClient);
+		}
+		else {
+			PluginCloseUser_API("Server", (HUSER)This);
+		}
+		This = lpNext;
+	}
+	closesocket(ListenSocket);
+	pthread_mutex_destroy(&thread_lock);
+#ifdef _WIN32 //Windows Clean Up
+	WSACleanup();
+#endif
+	LogOut("Server Close/INFO", 0, "Stopping the Server");
+	FILE* lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\config.nchatserver"
+#else
+	"configs/config.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite("NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", sizeof(char), 25, lpConfig);
+		fwrite(&ListenPort, sizeof(ListenPort), 1, lpConfig);
+		fwrite(&ICSize2, sizeof(ICSize2), 1, lpConfig);
+		fwrite(InvitationCode, sizeof(char), 256, lpConfig);
+		fwrite(&UserLimit, sizeof(UserLimit), 1, lpConfig);
+		fwrite(RoomName, sizeof(char), 256, lpConfig);
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Main Config file saved \033[32msuccessfully\033[0m.");
+	}
+	else LogOut("Server Close/INFO", 0, "Main Config file saved \033[31mfailed\033[0m.");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\blacklist.nchatserver"
+#else
+	"configs/blacklist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&EnableBlackList, sizeof(char), 1, lpConfig);
+		fwrite(&RealBLC, sizeof(RealBLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= BlackListCount; iEnum += 1) {
+			if(BlackList[iEnum] != NULL) {
+				iTmp = strlen(BlackList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(BlackList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x3E", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Blacklist saved \033[32msuccessfully\033[0m.");
+	}
+	else LogOut("Server Close/INFO", 0, "Blacklist saved \033[31mfailed\033[0m.");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\whitelist.nchatserver"
+#else
+	"configs/whitelist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&EnableWhiteList, sizeof(char), 1, lpConfig);
+		fwrite(&RealWLC, sizeof(RealWLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
+			if(WhiteList[iEnum] != NULL) {
+				iTmp = strlen(WhiteList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(WhiteList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x3F", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Whitelist saved \033[32msuccessfully\033[0m.");
+	}
+	else LogOut("Server Close/INFO", 0, "Whitelist saved \033[31mfailed\033[0m.");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\silencerlist.nchatserver"
+#else
+	"configs/silencerlist.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		fwrite(&RealSLC, sizeof(RealSLC), 1, lpConfig);
+		for(iEnum = 1; iEnum <= SilencerListCount; iEnum += 1) {
+			if(SilencerList[iEnum] != NULL) {
+				iTmp = strlen(SilencerList[iEnum]);
+				fwrite(&iTmp, sizeof(char), 1, lpConfig);
+				fwrite(SilencerList[iEnum], sizeof(char), iTmp, lpConfig);
+				fwrite("\x40", sizeof(char), 1, lpConfig);
+			}
+		}
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Silencerlist saved \033[32msuccessfully\033[0m.");
+	}
+	else LogOut("Server Close/INFO", 0, "Silencerlist saved \033[31mfailed\033[0m.");
+	lpConfig = fopen(
+#ifdef _WIN32
+	"configs\\trie.nchatserver"
+#else
+	"configs/trie.nchatserver"
+#endif
+	, "wb");
+	if(lpConfig != NULL) {
+		SaveTrieConfigs(lpConfig, lpTrieRoot, 0);
+		fclose(lpConfig);
+		LogOut("Server Close/INFO", 0, "Trie Configs File saved \033[32msuccessfully\033[0m.");
+	}
+	return ;
+}
 int main() {
 	LogOut("Server Startup/INFO", 0, "Welcome to NChat - Server(Version %d.%d.%d)", (unsigned char)VersionData[0], (unsigned char)VersionData[1], (unsigned char)VersionData[2]);
 	LogOut("Server Startup/INFO", 0, "Loading config files...");
@@ -1594,8 +1848,7 @@ int main() {
 		LogOut("Config Loader/INFO", 0, "Trie Config File loaded \033[32msuccessfully\033[0m");
 	}
 	else LogOut("Config Loader/WARN", 0, "Loaded trie config file \033[31mfailed\033[0m! %s", strerror(errno));
-	int iResult, iEnum, iTmp;
-	unsigned char ICSize, ICSize2;
+	int iResult;
 	lpConfig = fopen(
 #ifdef _WIN32
 	"configs\\config.nchatserver"
@@ -1700,7 +1953,9 @@ int main() {
 		UserLimit = 20;
 	}
 	//strcpy(InvitationCode, "o6kYMTvGkhFhZBg8QxAUeqLuKkw4sSaCOxgJ9urA0Rb3jQ5FTQ5Vr41JyVgm8VkrE3ZARVQaTn0huDTkNunBKP9pbdmBUrry9uxZopG5IkoX1BnHkeQeLqFIDl6x8nqn");
+	LogOut("Server Startup/INFO", 0, "Allocation in progress...");
 	UL_Head = UL_Last = (struct ULIST*)calloc(1, sizeof(struct ULIST));
+	Listener_Head = Listener_Last = (struct MSGLISTENERS*)calloc(1, sizeof(struct MSGLISTENERS));
 	LogOut("Plugin Loader/INFO", 0, "Loading Plugins...");
 	PluginInterface.cbSize = sizeof(PluginInterface);
 	PluginInterface.PluginLogOut = PluginLogOut_API;
@@ -1714,6 +1969,9 @@ int main() {
 	PluginInterface.PluginMakeUserNotSilence = PluginMakeUserNotSilence_API;
 	PluginInterface.PluginGetConfigValue = PluginGetConfigValue_API;
 	PluginInterface.PluginSetConfigValue = PluginSetConfigValue_API;
+	PluginInterface.PluginGolbalMessage = PluginGolbalMessage_API;
+	PluginInterface.PluginAddListener = PluginAddListener_API;
+	PluginInterface.PluginRemoveListener = PluginRemoveListener_API;
 #ifdef _WIN32
 	WIN32_FIND_DATAA wfd;
 	HANDLE hFind = FindFirstFileA("Plugins\\*.dll", &wfd);
@@ -1848,6 +2106,7 @@ int main() {
 	system("mkdir configs");
 	system("mkdir ChatFiles");
 	system("mkdir ChatMessages");
+	atexit(AtExit);
 	while(1) {
 		ClientSocket = accept(ListenSocket, NULL, NULL);
 	    if(ClientSocket == INVALID_SOCKET || ClientSocket == 0) {
@@ -1859,107 +2118,6 @@ int main() {
 		}
 		pthread_t Handler;
 		pthread_create(&Handler, NULL, SocketHandler, (void*)ClientSocket); 
-	}
-	closesocket(ListenSocket);
-	pthread_mutex_destroy(&thread_lock);
-#ifdef _WIN32 //Windows Clean Up
-	WSACleanup();
-#endif
-	LogOut("Server Close/INFO", 0, "Stopping the Server");
-	lpConfig = fopen(
-#ifdef _WIN32
-	"configs\\config.nchatserver"
-#else
-	"configs/config.nchatserver"
-#endif
-	, "wb");
-	if(lpConfig != NULL) {
-		fwrite("NSV\xFFN\0C\0H\0A\0T\0V\0E\0R\0I\0F\0Y", sizeof(char), 25, lpConfig);
-		fwrite(&ListenPort, sizeof(ListenPort), 1, lpConfig);
-		fwrite(&ICSize2, sizeof(ICSize2), 1, lpConfig);
-		fwrite(InvitationCode, sizeof(char), 256, lpConfig);
-		fwrite(&UserLimit, sizeof(UserLimit), 1, lpConfig);
-		fwrite(RoomName, sizeof(char), 256, lpConfig);
-		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Main Config file saved \033[32msuccessfully\033[0m.");
-	}
-	else LogOut("Server Close/INFO", 0, "Main Config file saved \033[31mfailed\033[0m.");
-	lpConfig = fopen(
-#ifdef _WIN32
-	"configs\\blacklist.nchatserver"
-#else
-	"configs/blacklist.nchatserver"
-#endif
-	, "wb");
-	if(lpConfig != NULL) {
-		fwrite(&EnableBlackList, sizeof(char), 1, lpConfig);
-		fwrite(&RealBLC, sizeof(RealBLC), 1, lpConfig);
-		for(iEnum = 1; iEnum <= BlackListCount; iEnum += 1) {
-			if(BlackList[iEnum] != NULL) {
-				iTmp = strlen(BlackList[iEnum]);
-				fwrite(&iTmp, sizeof(char), 1, lpConfig);
-				fwrite(BlackList[iEnum], sizeof(char), iTmp, lpConfig);
-				fwrite("\x3E", sizeof(char), 1, lpConfig);
-			}
-		}
-		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Blacklist saved \033[32msuccessfully\033[0m.");
-	}
-	else LogOut("Server Close/INFO", 0, "Blacklist saved \033[31mfailed\033[0m.");
-	lpConfig = fopen(
-#ifdef _WIN32
-	"configs\\whitelist.nchatserver"
-#else
-	"configs/whitelist.nchatserver"
-#endif
-	, "wb");
-	if(lpConfig != NULL) {
-		fwrite(&EnableWhiteList, sizeof(char), 1, lpConfig);
-		fwrite(&RealWLC, sizeof(RealWLC), 1, lpConfig);
-		for(iEnum = 1; iEnum <= WhiteListCount; iEnum += 1) {
-			if(WhiteList[iEnum] != NULL) {
-				iTmp = strlen(WhiteList[iEnum]);
-				fwrite(&iTmp, sizeof(char), 1, lpConfig);
-				fwrite(WhiteList[iEnum], sizeof(char), iTmp, lpConfig);
-				fwrite("\x3F", sizeof(char), 1, lpConfig);
-			}
-		}
-		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Whitelist saved \033[32msuccessfully\033[0m.");
-	}
-	else LogOut("Server Close/INFO", 0, "Whitelist saved \033[31mfailed\033[0m.");
-	lpConfig = fopen(
-#ifdef _WIN32
-	"configs\\silencerlist.nchatserver"
-#else
-	"configs/silencerlist.nchatserver"
-#endif
-	, "wb");
-	if(lpConfig != NULL) {
-		fwrite(&RealSLC, sizeof(RealSLC), 1, lpConfig);
-		for(iEnum = 1; iEnum <= SilencerListCount; iEnum += 1) {
-			if(SilencerList[iEnum] != NULL) {
-				iTmp = strlen(SilencerList[iEnum]);
-				fwrite(&iTmp, sizeof(char), 1, lpConfig);
-				fwrite(SilencerList[iEnum], sizeof(char), iTmp, lpConfig);
-				fwrite("\x40", sizeof(char), 1, lpConfig);
-			}
-		}
-		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Silencerlist saved \033[32msuccessfully\033[0m.");
-	}
-	else LogOut("Server Close/INFO", 0, "Silencerlist saved \033[31mfailed\033[0m.");
-	lpConfig = fopen(
-#ifdef _WIN32
-	"configs\\trie.nchatserver"
-#else
-	"configs/trie.nchatserver"
-#endif
-	, "wb");
-	if(lpConfig != NULL) {
-		SaveTrieConfigs(lpConfig, lpTrieRoot, 0);
-		fclose(lpConfig);
-		LogOut("Server Close/INFO", 0, "Trie Configs File saved \033[32msuccessfully\033[0m.");
 	}
 	return 0;
 }
