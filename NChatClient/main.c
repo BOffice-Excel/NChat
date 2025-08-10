@@ -786,6 +786,47 @@ void* RecvMessageThread(void* lParam) {
 				free(lvi.pszText);
 				break;
 			}
+			case '\x12': {//Global Message
+				time_t Time;
+				recv(sockfd, (char*)&Time, sizeof(Time), 0);
+				char c, *lpMessage = (char*)calloc(11451419, sizeof(char));
+				int msglen;
+				recv(sockfd, &c, sizeof(c), 0);
+				lpMessage[0] = '[';
+				recv(sockfd, lpMessage + 1, c, 0);
+				lpMessage[c + 1] = ']';
+				lpMessage[c + 2] = ' ';
+				recv(sockfd, (char*)&msglen, sizeof(msglen), 0);
+				recv(sockfd, lpMessage + c + 3, msglen, 0);
+				LVITEMA lvi;
+				lvi.pszText = lpMessage;
+				lvi.mask = LVIF_TEXT | LVIF_PARAM;
+				lvi.lParam = MT_SYSTEMNOTIFICATION;
+				lvi.iImage = -1;
+				lvi.iSubItem = 0;
+				lvi.iItem = ListView_GetItemCount(GetDlgItem(hWndMain, 2));
+				ListView_InsertItem(GetDlgItem(hWndMain, 2), &lvi);
+				lvi.pszText = (char*)calloc(114514, sizeof(char));
+				struct tm* TimeStruct = localtime(&Time);
+				strftime(lvi.pszText, 114514, "%Y/%m/%d %H:%M:%S", TimeStruct);
+				ListView_SetItemText(GetDlgItem(hWndMain, 2), lvi.iItem, 1, lvi.pszText);
+				free(lvi.pszText);
+				NEWLVTILEINFO lti;
+				memset(&lti, 0, sizeof(lti));
+	            lti.puColumns = (LPUINT)calloc(5, sizeof(UINT));
+	            lti.puColumns[0] = 1;
+	            lti.puColumns[1] = 2;
+		        lti.piColFmt = (LPINT)calloc(5, sizeof(INT));
+				lti.cbSize = sizeof(lti);
+				lti.cColumns = 2;
+				lti.iItem = lvi.iItem;
+				ListView_SetTileInfo(GetDlgItem(hWndMain, 2), &lti);
+				free(lti.puColumns);
+				free(lti.piColFmt);
+				free(lvi.pszText);
+				free(lpMessage);
+				break;
+			}
 			case '\xFF': {//All chat records have been sent
 				ShowToast = TRUE;
 				break;
@@ -865,6 +906,7 @@ void *UploadFile(void *lParam) {
 	    free(ReadData);
     	return FALSE;
 	}
+	send(sockfd, "NCHAT CLIENT HEADER", 19, 0);
     iResult = send(sockfd, "\xC", 1, 0);
 	if(iResult == SOCKET_ERROR) {
 	    MessageBox(hWndMain, "Send Failed!", "Uploaded file failed!", MB_ICONERROR);
@@ -965,6 +1007,7 @@ void *DownloadingFileThread(void *lParam) {
 		free(ReadData);
     	return FALSE;
 	}
+	send(sockfd2, "NCHAT CLIENT HEADER", 19, 0); 
     iResult = send(sockfd2, "\x10", 1, 0);
 	if(iResult == SOCKET_ERROR) {
 	    MessageBox(hWndMain, "Send Failed!", "Downloaded file failed!", MB_ICONERROR);
@@ -1109,6 +1152,7 @@ void *UploadPicFromClipboard(void *lParam) {
 	    free(lpBits);
     	return FALSE;
 	}
+	send(sockfd, "NCHAT CLIENT HEADER", 19, 0); 
     iResult = send(sockfd, "\xC", 1, 0);
 	if(iResult == SOCKET_ERROR) {
 	    MessageBox(hWndMain, "Send Failed!", "Uploaded picture failed!", MB_ICONERROR);
@@ -1182,6 +1226,7 @@ BOOL Signin(const char *IP, const char *Port, const char *Name, const char *Invi
 		closesocket(sockfd);
     	return FALSE;
 	}
+	send(sockfd, "NCHAT CLIENT HEADER", 19, 0); 
     iResult = send(sockfd, "\xA", 1, 0);
 	if(iResult == SOCKET_ERROR) {
 		sprintf(ReceiveData, "\xFC|ERR_SEND_FAILED");
