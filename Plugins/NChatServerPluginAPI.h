@@ -4,8 +4,9 @@
 #ifndef _TIME_H_
 #include <time.h>
 #endif
-typedef void *HUSER;
-typedef void (*MSGLISTENERFUNC)(const char*, const char*, int, const char*, time_t);//FakeUserName, UserName, MsgType(0=Text, 1=Join, 2=Left, 3=File, 4=SilencerAdd, 5=SilencerRemove), Message, Time
+typedef void *HUSER, *HNOUSERLISTENERFUNC;
+typedef void (*MSGLISTENERFUNC)(const char*, const char*, int, const char*, time_t);//FakeUserName, UserName, MsgType(0=Text, 1=Join, 2=Left, 3=File, 4=SilencerAdd, 5=SilencerRemove, 6=GlobalMessage), Message, Time
+typedef void (*MSGLISTENERNOUSERFUNC)(const char*, int, const char*, time_t);//UserName, MsgType(0=Text, 1=Join, 2=Left, 3=File, 4=SilencerAdd, 5=SilencerRemove, 6=GlobalMessage), Message, Time
 typedef void (*PLUGINLOGOUTFUNC)(const char* Poster, const char* Type, int NoNewLine, const char* Format, ...);
 typedef int (*PLUGINGETUSERSLISTFUNC)(char** UsersList, int nMax);
 typedef HUSER (*PLUGINCREATEUSERFUNC)(const char* ModuleName, const char* UserName, MSGLISTENERFUNC MsgListener);
@@ -17,6 +18,9 @@ typedef int (*PLUGINMAKEUSERSILENCE)(const char* ModuleName, const char* UserNam
 typedef int (*PLUGINMAKEUSERNOTSILENCE)(const char* ModuleName, const char* UserName);
 typedef int (*PLUGINGETCONFIGVALUE)(const char* NameSpace, const char* Key, char* Value);
 typedef int (*PLUGINSETCONFIGVALUE)(const char* NameSpace, const char* Key, const char* Value);
+typedef void (*PLUGINGLOBALMESSAGE)(const char* ModuleName, const char* Message);
+typedef HNOUSERLISTENERFUNC (*PLUGINADDLISTENER)(MSGLISTENERNOUSERFUNC MsgListener);
+typedef void (*PLUGINREMOVELISTENER)(HNOUSERLISTENERFUNC hNoUserListenerFunc);
 typedef struct{
 	size_t cbSize;
 	PLUGINLOGOUTFUNC PluginLogOut;//void PluginLogOut(const char* ModuleName, const char* Type, int NoNewLine, const char* Format, ...);
@@ -30,6 +34,9 @@ typedef struct{
 	PLUGINMAKEUSERNOTSILENCE PluginMakeUserNotSilence;//int PluginMakeUserNotSilence(const char* ModuleName, const char* UserName); 
 	PLUGINGETCONFIGVALUE PluginGetConfigValue;//int PluginGetConfigValue(const char* NameSpace, const char* Key, char* Value);
 	PLUGINSETCONFIGVALUE PluginSetConfigValue;//void PluginSetConfigValue(const char* NameSpace, const char* Key, const char* Value);
+	PLUGINGLOBALMESSAGE PluginGolbalMessage;//void PluginGolbalMessage(const char* ModuleName, const char* Message);
+	PLUGINADDLISTENER PluginAddListener;//HNOUSERLISTENERFUNC PluginAddListener(MSGLISTENERNOUSERFUNC MsgListener);
+	PLUGINREMOVELISTENER PluginRemoveListener;//void PluginRemoveListener(HNOUSERLISTENERFUNC hNoUserListenerFunc);
 }PLUGININTERFACE, *LPPLUGININTERFACE;
 #ifdef _WIN32
 #define DLLEXPORT __declspec(dllexport)
